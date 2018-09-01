@@ -106,23 +106,48 @@ typedef struct {
 
 
 typedef enum {
+    // 在接收到完整的HTTP头部后处理的HTTP阶段
     NGX_HTTP_POST_READ_PHASE = 0,
 
+    // 在将请求的URI与location表达式匹配前，修改请求的
+    // URI（所谓的重定向）是一个独立的HTTP阶段
     NGX_HTTP_SERVER_REWRITE_PHASE,
 
+    // 根据请求的URL寻找匹配的location表达式，这个阶段
+    // 只能由ngx_http_core_module模块实现，不建议其他HTTP
+    // 模块模块重新定义这一阶段的行为
     NGX_HTTP_FIND_CONFIG_PHASE,
+
+    // 在NGX_HTTP_FIND_CONFIG_PHASE阶段寻找到匹配的location
+    // 之后再修改请求的URI
     NGX_HTTP_REWRITE_PHASE,
+
+    // 这一阶段用于在rewrite重写URL后，防止错误的nginx配置导致
+    // 死循环（递归地修改URI），因此，这一阶段仅由ngx_http_core_module
+    // 模块处理。目前，控制死循环的方法就是看rewrite次数，超过一定阈值
+    // 就认为出现了死循环，返回500
     NGX_HTTP_POST_REWRITE_PHASE,
 
+    // 表示在处理NGX_HTTP_ACCESS_PHASE阶段决定请求的访问权限前，HTTP模块可以介入的处理阶段
     NGX_HTTP_PREACCESS_PHASE,
 
+    // 这个阶段用于让HTTP模块判断是否允许这个请求访问Nginx服务器
     NGX_HTTP_ACCESS_PHASE,
+
+    // 在NGX_HTTP_ACCESS_PHASE阶段中，当HTTP模块的handler处理函数返回不允许访问的错误码时（
+    // 实际就是NGX_HTTP_FORBIDDEN或者NGX_HTTP_UNAUTHORIZED），这里将负责向用户发送拒绝服务的
+    // 错误响应，因此这个阶段实际上用于给NGX_HTTP_ACCESS_PHASE阶段收尾
     NGX_HTTP_POST_ACCESS_PHASE,
 
+    // 这个阶段完全为try_files配置项而设立的，当HTTP访问静态文件资源时，try_files配置项可以
+    // 使这个请求顺序地访问多个静态文件资源，如果某一次访问失败，则继续访问try_files中指定的
+    // 下一个静态资源。
     NGX_HTTP_PRECONTENT_PHASE,
 
+    // 用于处理HTTP请求内容的阶段，这是大部分HTTP模块最愿意介入的阶段
     NGX_HTTP_CONTENT_PHASE,
 
+    // 处理完请求记录日志的阶段。
     NGX_HTTP_LOG_PHASE
 } ngx_http_phases;
 
@@ -132,15 +157,30 @@ typedef ngx_int_t (*ngx_http_phase_handler_pt)(ngx_http_request_t *r,
     ngx_http_phase_handler_t *ph);
 
 struct ngx_http_phase_handler_s {
+    // 在处理任何一个HTTP阶段的时候，HTTP框架将会在checker方法已经实现的情况下
+    // 首先调用该方法来处理请求。这种情况下不是直接调用handler方法，而是在checker
+    // 中间接调用handler方法。
+    // 但是所有的checker方法都是由框架中的ngx_http_core_module模块实现的，普通的HTTP模块无法
+    // 重定义checker方法
     ngx_http_phase_handler_pt  checker;
+
+    // 除ngx_http_core_module模块以外的HTTP模块，只能通过定义hanler方法才能介入某个阶段的HTTP请求
     ngx_http_handler_pt        handler;
+
+    // 将要执行的下一个HTTP处理阶段的索引
+    // next的设计使得处理阶段不必按照顺序来执行，既可以向后跳跃多个阶段，也能跳跃到之前的阶段来处理。
     ngx_uint_t                 next;
 };
 
 
 typedef struct {
+    // handler数组首地址，保存一个请求可能经历的所有处理方法
     ngx_http_phase_handler_t  *handlers;
+    // 表示NGX_HTTP_SERVER_REWRITE_PHASE阶段第一个handler处理
+    // 方法在handlers数组中的索引，用于在执行HTTP请求的任何阶段快速
+    // 跳转到NGX_HTTP_SERVER_REWRITE_PHASE阶段处理请求
     ngx_uint_t                 server_rewrite_index;
+    // 表示NGX_HTTP_REWRITE_PHASE阶段第一个处理方法在handlers数组中的索引
     ngx_uint_t                 location_rewrite_index;
 } ngx_http_phase_engine_t;
 
@@ -173,6 +213,7 @@ typedef struct {
 
     ngx_array_t               *ports;
 
+    // 用于在HTTP框架初始化时帮助各个HTTP模块在任意阶段中添加HTTP处理方法
     ngx_http_phase_t           phases[NGX_HTTP_LOG_PHASE + 1];
 } ngx_http_core_main_conf_t;
 
