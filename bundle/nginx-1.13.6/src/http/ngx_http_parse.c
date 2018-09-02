@@ -99,7 +99,7 @@ static uint32_t  usual[] = {
 
 
 /* gcc, icc, msvc and others compile these switches as an jump table */
-
+// 分析请求行
 ngx_int_t
 ngx_http_parse_request_line(ngx_http_request_t *r, ngx_buf_t *b)
 {

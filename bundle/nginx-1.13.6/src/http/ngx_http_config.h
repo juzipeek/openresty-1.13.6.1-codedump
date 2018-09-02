@@ -22,16 +22,21 @@ typedef struct {
 
 
 typedef struct {
+    // 解析配置文件前调用
     ngx_int_t   (*preconfiguration)(ngx_conf_t *cf);
+    // 完成解析配置文件时调用
     ngx_int_t   (*postconfiguration)(ngx_conf_t *cf);
-
+    // 当需要创建数据结构用于存储main级别(只属于http{}块的配置项)
     void       *(*create_main_conf)(ngx_conf_t *cf);
+    // 初始化main级别配置项
     char       *(*init_main_conf)(ngx_conf_t *cf, void *conf);
-
+    // 直属于server{}块
     void       *(*create_srv_conf)(ngx_conf_t *cf);
+    // 合并main和srv级别下的同名配置项
     char       *(*merge_srv_conf)(ngx_conf_t *cf, void *prev, void *conf);
-
+    // 直属于location{}块
     void       *(*create_loc_conf)(ngx_conf_t *cf);
+    // 合并srv和location级别下的同名配置项
     char       *(*merge_loc_conf)(ngx_conf_t *cf, void *prev, void *conf);
 } ngx_http_module_t;
 

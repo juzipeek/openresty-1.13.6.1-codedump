@@ -119,8 +119,13 @@ typedef enum {
 
 
 struct ngx_connection_s {
+    // 连接相关数据存放在这里
+    // 在连接未使用时，data成员用于充当连接池中空闲链表中的next指针。
+    // 当连接被使用时，在HTTP框架中，指向ngx_http_request_t结构体
     void               *data;
+    // 对应的读事件
     ngx_event_t        *read;
+    // 对应的写事件
     ngx_event_t        *write;
 
     ngx_socket_t        fd;
@@ -130,12 +135,15 @@ struct ngx_connection_s {
     ngx_recv_chain_pt   recv_chain;
     ngx_send_chain_pt   send_chain;
 
+    // 这个连接对应的监听者对象
     ngx_listening_t    *listening;
 
+    // 这个连接已经发送出去的字节数
     off_t               sent;
 
     ngx_log_t          *log;
 
+    // 内存池
     ngx_pool_t         *pool;
 
     int                 type;
@@ -154,12 +162,17 @@ struct ngx_connection_s {
     struct sockaddr    *local_sockaddr;
     socklen_t           local_socklen;
 
+    // 用于接收、缓存客户端发来的字符流，每个事件消费模块可自由决定从
+    // 连接池中分配多大的空间给buffer。在HTTP模块中，决定于client_header_buffer_size配置项
     ngx_buf_t          *buffer;
 
+    // 加入到reusable_connections_queue双向队列中
     ngx_queue_t         queue;
 
+    // 连接使用次数
     ngx_atomic_uint_t   number;
 
+    // 处理请求的次数
     ngx_uint_t          requests;
 
     unsigned            buffered:8;

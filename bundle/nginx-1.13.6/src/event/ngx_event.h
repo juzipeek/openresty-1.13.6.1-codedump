@@ -28,39 +28,50 @@ typedef struct {
 
 
 struct ngx_event_s {
+    // 事件相关数据存放在这里。通常指向ngx_connection_t结构体，开启文件异步IO时，
+    // 可能会指向ngx_event_aio_t结构体
     void            *data;
 
+    // 为1表示可写
     unsigned         write:1;
 
+    // 为1表示可以接收新的连接
     unsigned         accept:1;
 
     /* used to detect the stale events in kqueue and epoll */
+    // 用于区分事件是否过期。当开始处理一批事件时，处理前面的事件可能会导致关闭一些
+    // 连接，而这些连接中有未处理的后面的事件。
     unsigned         instance:1;
 
     /*
      * the event was passed or would be passed to a kernel;
      * in aio mode - operation was posted.
      */
+    // 为1表示当前事件是活跃的。
     unsigned         active:1;
 
     unsigned         disabled:1;
 
     /* the ready event; in aio mode 0 means that no operation can be posted */
+    // 为1表示当前事件已经准备就绪，允许这个事件的消费模块来处理这个事件。
+    // 在HTTP框架中，经常会检查事件的ready标志位以确定是否可以接收请求或者发送响应。
     unsigned         ready:1;
 
     unsigned         oneshot:1;
 
     /* aio operation is complete */
     unsigned         complete:1;
-
+    // 为1表示当前处理的字符流已经结束
     unsigned         eof:1;
+    // 处理事件时出错
     unsigned         error:1;
-
+    // 事件超时
     unsigned         timedout:1;
+    // 事件在定时器中
     unsigned         timer_set:1;
-
+    // 表示需要延迟处理这个事件，仅用于限速功能
     unsigned         delayed:1;
-
+    // 延迟建立TCP连接，也就是经过TCP三次握手并不建立连接，而是等到真正收到数据包才会建立TCP连接
     unsigned         deferred_accept:1;
 
     /* the pending eof reported by kqueue, epoll or in aio chain operation */
@@ -104,9 +115,12 @@ struct ngx_event_s {
 #if (NGX_HAVE_KQUEUE) || (NGX_HAVE_IOCP)
     int              available;
 #else
+    // epoll事件驱动机制下表示一次尽可能多地建立TCP连接，它与multi_accept配置项
+    // 对应
     unsigned         available:1;
 #endif
 
+    // 事件被触发时的回调函数
     ngx_event_handler_pt  handler;
 
 
@@ -118,6 +132,7 @@ struct ngx_event_s {
 
     ngx_log_t       *log;
 
+    // 定时器节点
     ngx_rbtree_node_t   timer;
 
     /* the posted queue */

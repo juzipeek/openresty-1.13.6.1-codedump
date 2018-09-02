@@ -827,9 +827,11 @@ ngx_http_handler(ngx_http_request_t *r)
 
         r->lingering_close = (r->headers_in.content_length_n > 0
                               || r->headers_in.chunked);
+        // internal为0表示不需要重定向，因此阶段处理函数从第一个阶段开始
         r->phase_handler = 0;
 
     } else {
+        // 如果internal不是0，表示需要进行重定向，因此进入phase_engine.server_rewrite_index处理
         cmcf = ngx_http_get_module_main_conf(r, ngx_http_core_module);
         r->phase_handler = cmcf->phase_engine.server_rewrite_index;
     }
@@ -845,7 +847,7 @@ ngx_http_handler(ngx_http_request_t *r)
     ngx_http_core_run_phases(r);
 }
 
-
+// 将调用各个HTTP模块共同处理请求
 void
 ngx_http_core_run_phases(ngx_http_request_t *r)
 {
@@ -867,7 +869,7 @@ ngx_http_core_run_phases(ngx_http_request_t *r)
     }
 }
 
-
+// NGX_HTTP_POST_READ_PHASE、NGX_HTTP_PREACCESS_PHASE、NGX_HTTP_LOG_PHASE阶段的checker方法
 ngx_int_t
 ngx_http_core_generic_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 {
@@ -883,28 +885,33 @@ ngx_http_core_generic_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 
     rc = ph->handler(r);
 
+    // 返回OK，将进入下一个阶段处理，而不会理会当前阶段中是否还有其他的处理
     if (rc == NGX_OK) {
         r->phase_handler = ph->next;
         return NGX_AGAIN;
     }
 
+    // 返回NGX_DECLINED将进入的下一个处理方法，而下一个处理方法
+    // 可能属于当前阶段，也可能属于下一个节点
     if (rc == NGX_DECLINED) {
         r->phase_handler++;
         return NGX_AGAIN;
     }
 
+    // 返回NGX_AGAIN或者NGX_DONE那么当前请求将仍然停留在这一个处理阶段中
     if (rc == NGX_AGAIN || rc == NGX_DONE) {
         return NGX_OK;
     }
 
     /* rc == NGX_ERROR || rc == NGX_HTTP_...  */
-
+    // 如果返回NGX_ERROR或者NGX_HTTP_开头的返回码，则调用ngx_http_finalize_request
+    // 结束请求
     ngx_http_finalize_request(r, rc);
 
     return NGX_OK;
 }
 
-
+// NGX_HTTP_SERVER_REWRITE_PHASE阶段的checker方法
 ngx_int_t
 ngx_http_core_rewrite_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 {
@@ -931,7 +938,7 @@ ngx_http_core_rewrite_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
     return NGX_OK;
 }
 
-
+// NGX_HTTP_FIND_CONFIG_PHASE阶段的checker方法
 ngx_int_t
 ngx_http_core_find_config_phase(ngx_http_request_t *r,
     ngx_http_phase_handler_t *ph)
@@ -1069,13 +1076,16 @@ ngx_http_core_post_rewrite_phase(ngx_http_request_t *r,
     return NGX_AGAIN;
 }
 
-
+// NGX_HTTP_ACCESS_PHASE阶段的处理函数，用于控制用户发起的请求是否合法，
+// 如检测客户端的IP地址是否允许被访问
 ngx_int_t
 ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 {
     ngx_int_t                  rc;
     ngx_http_core_loc_conf_t  *clcf;
 
+    // r != r->main表示当前请求只是派生出来的子请求，子请求不需要执行
+    // NGX_HTTP_ACCESS_PHASE阶段的处理
     if (r != r->main) {
         r->phase_handler = ph->next;
         return NGX_AGAIN;
@@ -1086,25 +1096,38 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
 
     rc = ph->handler(r);
 
+    // 返回NGX_DECLINED意味着希望立刻执行下一个handler，
+    // 无论是否属于NGX_HTTP_ACCESS_PHASE
     if (rc == NGX_DECLINED) {
         r->phase_handler++;
         return NGX_AGAIN;
     }
 
+    // 返回AGAIN或者DONE意味着当前的NGX_HTTP_ACCESS_PHASE没有一次性执行完毕
     if (rc == NGX_AGAIN || rc == NGX_DONE) {
         return NGX_OK;
     }
 
+    // 以下是返回值不是 NGX_DECLINED、NGX_AGAIN、NGX_DONE的情况
+    
+    // 由于NGX_HTTP_ACCESS_PHASE阶段在NGX_HTTP_FIND_CONFIG_PHASE阶段后面，
+    // 因此此时请求已经找到了匹配的的location模块
     clcf = ngx_http_get_module_loc_conf(r, ngx_http_core_module);
 
-    if (clcf->satisfy == NGX_HTTP_SATISFY_ALL) {
-
-        if (rc == NGX_OK) {
+    if (clcf->satisfy == NGX_HTTP_SATISFY_ALL) { // NGX_HTTP_SATISFY_ALL表示nginx配置文件中配置了satisfy all参数
+        // satisfy all要求所有NGX_HTTP_ACCESS_PHASE阶段的handler方法共同作用于该请求
+        
+        if (rc == NGX_OK) { // 该模块返回NGX_OK，意味着该模块认为满足访问要求，需要继续调用下一个模块查询是否满足要求
             r->phase_handler++;
             return NGX_AGAIN;
         }
 
-    } else {
+        // 如果返回值不是NGX_OK，则调用ngx_http_finalize_request结束请求
+    } else {  // 这里是配置中配置了satisfy any的情况
+        // satisfy any不要求所有NGX_HTTP_ACCESS_PHASE阶段的模块都通过请求，只要有一个同意就可以放行
+        
+        // 返回NGX_OK，表示该模块认为有权限访问，因此phase_handler指向下一个handler
+        // 并且access_code置为0
         if (rc == NGX_OK) {
             r->access_code = 0;
 
@@ -1116,6 +1139,7 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
             return NGX_AGAIN;
         }
 
+        // NGX_HTTP_FORBIDDEN或者NGX_HTTP_UNAUTHORIZED表示该模块不同意访问
         if (rc == NGX_HTTP_FORBIDDEN || rc == NGX_HTTP_UNAUTHORIZED) {
             if (r->access_code != NGX_HTTP_UNAUTHORIZED) {
                 r->access_code = rc;
@@ -1127,7 +1151,7 @@ ngx_http_core_access_phase(ngx_http_request_t *r, ngx_http_phase_handler_t *ph)
     }
 
     /* rc == NGX_ERROR || rc == NGX_HTTP_...  */
-
+    // 到这里是请求出错的情况，结束这次请求
     ngx_http_finalize_request(r, rc);
     return NGX_OK;
 }
@@ -1159,7 +1183,7 @@ ngx_http_core_post_access_phase(ngx_http_request_t *r,
     return NGX_AGAIN;
 }
 
-
+// NGX_HTTP_CONTENT_PHASE阶段的处理函数
 ngx_int_t
 ngx_http_core_content_phase(ngx_http_request_t *r,
     ngx_http_phase_handler_t *ph)
@@ -1169,7 +1193,14 @@ ngx_http_core_content_phase(ngx_http_request_t *r,
     ngx_str_t  path;
 
     if (r->content_handler) {
+        // content_handler不为空意味着在NGX_HTTP_FIND_CONFIG_PHASE阶段中，
+        // 匹配了URI请求的location内，是否有HTTP模块把处理方法设置到了
+        // ngx_http_core_loc_conf_t结构体的handler成员中。
+        
+        // ngx_http_request_empty_handler是什么都不做的方法，设置为这个函数
+        // 意味着再有写事件不做任何事情
         r->write_event_handler = ngx_http_request_empty_handler;
+        // 将content_handler的返回值放入ngx_http_finalize_request中
         ngx_http_finalize_request(r, r->content_handler(r));
         return NGX_OK;
     }
@@ -1180,23 +1211,25 @@ ngx_http_core_content_phase(ngx_http_request_t *r,
     rc = ph->handler(r);
 
     if (rc != NGX_DECLINED) {
+        // 没有返回NGX_DECLINED意味着不再执行该阶段的其他handler
         ngx_http_finalize_request(r, rc);
         return NGX_OK;
     }
 
     /* rc == NGX_DECLINED */
-
+    // 以下是返回NGX_DECLINED的情况
     ph++;
 
-    if (ph->checker) {
+    if (ph->checker) {  // 只有在该阶段下一个handler存在的情况下才继续执行
         r->phase_handler++;
         return NGX_AGAIN;
     }
 
+    // 以下是找不到该阶段handler的情况
     /* no content handler was found */
 
     if (r->uri.data[r->uri.len - 1] == '/') {
-
+        // URI以/结尾，返回403
         if (ngx_http_map_uri_to_path(r, &path, &root, 0) != NULL) {
             ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                           "directory index of \"%s\" is forbidden", path.data);
@@ -1207,7 +1240,7 @@ ngx_http_core_content_phase(ngx_http_request_t *r,
     }
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "no handler found");
-
+    // 返回404
     ngx_http_finalize_request(r, NGX_HTTP_NOT_FOUND);
     return NGX_OK;
 }
@@ -1737,7 +1770,7 @@ ngx_http_send_response(ngx_http_request_t *r, ngx_uint_t status,
     return ngx_http_output_filter(r, &out);
 }
 
-
+// 负责构造HTTP响应行、头部，同时发送它们给客户端
 ngx_int_t
 ngx_http_send_header(ngx_http_request_t *r)
 {

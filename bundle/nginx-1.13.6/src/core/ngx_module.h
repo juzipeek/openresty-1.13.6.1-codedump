@@ -220,7 +220,12 @@
 
 
 struct ngx_module_s {
+    // 对于某一类模块而言，ctx_index表示当前模块在这类模块中的序号。
+    // 这个成员通常由管理这类模块的一个Nginx核心模块设置。
+    // 比如对于HTTP模块而言，由核心模块ngx_http_module设置
     ngx_uint_t            ctx_index;
+
+    // 在ngx_modules数组的索引
     ngx_uint_t            index;
 
     char                 *name;
@@ -231,8 +236,15 @@ struct ngx_module_s {
     ngx_uint_t            version;
     const char           *signature;
 
+    // 指向一类模块的上下文结构指针。不同类型的模块需要不同的上下文结构体。
+    // 比如HTTP模块，该指针指向ngx_http_module_t结构体
     void                 *ctx;
+
+    // 指向nginx.conf的配置项
     ngx_command_t        *commands;
+
+    // 模块类型，与ctx指针紧密相关。包括以下几种：
+    // NGX_HTTP_MODULE，NGX_CORE_MODULE，NGX_CONF_MOULE，NGX_EVENT_MODULE，NGX_MAIL_MODULE
     ngx_uint_t            type;
 
     ngx_int_t           (*init_master)(ngx_log_t *log);

@@ -18,35 +18,55 @@ typedef void *            ngx_buf_tag_t;
 typedef struct ngx_buf_s  ngx_buf_t;
 
 struct ngx_buf_s {
+    // pos通常用来告诉使用者本次应该从pos这个位置开始处理内存中的数据，这样设置是因为同一个
+    // ngx_buf_t可能被多次反复处理。
     u_char          *pos;
+
+    // last通常表示有效的内容到此为止。注意：pos和last之间的内存是希望nginx处理的内容
     u_char          *last;
+
+    // 处理文件时，file_pos与file_last含义与处理内存时的pod和last类似
     off_t            file_pos;
     off_t            file_last;
 
+    // start,end用来表示内存的开始和结束
     u_char          *start;         /* start of buffer */
     u_char          *end;           /* end of buffer */
+
+    // 表示当前缓冲区的类型
     ngx_buf_tag_t    tag;
+
+    // 引用的文件
     ngx_file_t      *file;
     ngx_buf_t       *shadow;
 
 
     /* the buf's content could be changed */
+    // 临时内存标志位，为1表示数据在内存中且这段内存可以修改
     unsigned         temporary:1;
 
     /*
      * the buf's content is in a memory cache or in a read only memory
      * and must not be changed
      */
+    // 标志位，为1时表示数据在内存中且不可被修改
     unsigned         memory:1;
 
     /* the buf's content is mmap()ed and must not be changed */
+    // 为1表示这段内存是mmap系统调用映射过来的，不可以被修改
     unsigned         mmap:1;
 
+    // 为1表示可以回收
     unsigned         recycled:1;
+    // 为1表示这段缓冲区处理的是文件而不是内存
     unsigned         in_file:1;
+    // 为1表示需要执行flush操作
     unsigned         flush:1;
+    // 为1表示对这段缓冲区是否采用同步方式
     unsigned         sync:1;
+    // 标志位，表示是否是最后一块缓冲区，因为可能由ngx_chain_t串联起来
     unsigned         last_buf:1;
+    // 是否是ngx_chain_t的最后一块缓冲区
     unsigned         last_in_chain:1;
 
     unsigned         last_shadow:1;

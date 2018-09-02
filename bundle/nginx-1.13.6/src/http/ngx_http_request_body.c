@@ -39,9 +39,12 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
     ngx_http_request_body_t   *rb;
     ngx_http_core_loc_conf_t  *clcf;
 
+    // 原始请求的引用计数+1
     r->main->count++;
 
     if (r != r->main || r->request_body || r->discard_body) {
+        // r->request_body不为空说明已经读取过HTTP包体了，不需要再读取一次
+        // discard_body为1说明曾经执行过丢弃包体的方法，现在包体正在丢弃中。
         r->request_body_no_buffering = 0;
         post_handler(r);
         return NGX_OK;
@@ -74,6 +77,7 @@ ngx_http_read_client_request_body(ngx_http_request_t *r,
     r->request_body = rb;
 
     if (r->headers_in.content_length_n < 0 && !r->headers_in.chunked) {
+        // content_length_n长度小于0
         r->request_body_no_buffering = 0;
         post_handler(r);
         return NGX_OK;
