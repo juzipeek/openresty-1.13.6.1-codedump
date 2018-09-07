@@ -16,7 +16,7 @@ static ngx_int_t ngx_event_connect_set_transparent(ngx_peer_connection_t *pc,
     ngx_socket_t s);
 #endif
 
-
+// 发起连接
 ngx_int_t
 ngx_event_connect_peer(ngx_peer_connection_t *pc)
 {
@@ -38,6 +38,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
     type = (pc->type ? pc->type : SOCK_STREAM);
 
+    // 创建一个socket套接字
     s = ngx_socket(pc->sockaddr->sa_family, type, 0);
 
     ngx_log_debug2(NGX_LOG_DEBUG_EVENT, pc->log, 0, "%s socket %d",
@@ -49,7 +50,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
         return NGX_ERROR;
     }
 
-
+    // 获取一个空闲的ngx_connection_t结构体
     c = ngx_get_connection(s, pc->log);
 
     if (c == NULL) {
@@ -63,6 +64,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
     c->type = type;
 
+    // 设置接收缓冲区
     if (pc->rcvbuf) {
         if (setsockopt(s, SOL_SOCKET, SO_RCVBUF,
                        (const void *) &pc->rcvbuf, sizeof(int)) == -1)
@@ -73,6 +75,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
         }
     }
 
+    // 非阻塞
     if (ngx_nonblocking(s) == -1) {
         ngx_log_error(NGX_LOG_ALERT, pc->log, ngx_socket_errno,
                       ngx_nonblocking_n " failed");
@@ -145,7 +148,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
         }
     }
 
-    if (type == SOCK_STREAM) {
+    if (type == SOCK_STREAM) { // 设置TCP方式下的各种方法
         c->recv = ngx_recv;
         c->send = ngx_send;
         c->recv_chain = ngx_recv_chain;
@@ -163,7 +166,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 #endif
         }
 
-    } else { /* type == SOCK_DGRAM */
+    } else { /* type == SOCK_DGRAM */ // UDP
         c->recv = ngx_udp_recv;
         c->send = ngx_send;
         c->send_chain = ngx_udp_send_chain;
@@ -179,6 +182,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
     pc->connection = c;
 
+    // ngx_connection_t增加连接计数
     c->number = ngx_atomic_fetch_add(ngx_connection_counter, 1);
 
     if (ngx_add_conn) {
@@ -190,12 +194,14 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
     ngx_log_debug3(NGX_LOG_DEBUG_EVENT, pc->log, 0,
                    "connect to %V, fd:%d #%uA", pc->name, s, c->number);
 
+    // 发起连接
     rc = connect(s, pc->sockaddr, pc->socklen);
 
     if (rc == -1) {
+        // 连接失败
         err = ngx_socket_errno;
 
-
+        // 不是NGX_EINPROGRESS以及不是NGX_EAGAIN说明出错了
         if (err != NGX_EINPROGRESS
 #if (NGX_WIN32)
             /* Winsock returns WSAEWOULDBLOCK (NGX_EAGAIN) */
@@ -235,12 +241,14 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
     if (ngx_add_conn) {
         if (rc == -1) {
+            // 这里肯定是前面的NGX_AGAIN等情况，需要等待下次事件唤醒
 
             /* NGX_EINPROGRESS */
 
             return NGX_AGAIN;
         }
 
+        // 连接成功
         ngx_log_debug0(NGX_LOG_DEBUG_EVENT, pc->log, 0, "connected");
 
         wev->ready = 1;
@@ -285,6 +293,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
         event = NGX_LEVEL_EVENT;
     }
 
+    // 添加读事件
     if (ngx_add_event(rev, NGX_READ_EVENT, event) != NGX_OK) {
         goto failed;
     }
@@ -293,6 +302,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
         /* NGX_EINPROGRESS */
 
+        // 添加写事件，等待被唤醒才能知道是否成功
         if (ngx_add_event(wev, NGX_WRITE_EVENT, event) != NGX_OK) {
             goto failed;
         }
@@ -302,6 +312,7 @@ ngx_event_connect_peer(ngx_peer_connection_t *pc)
 
     ngx_log_debug0(NGX_LOG_DEBUG_EVENT, pc->log, 0, "connected");
 
+    // 到了这里就是连接成功了
     wev->ready = 1;
 
     return NGX_OK;
