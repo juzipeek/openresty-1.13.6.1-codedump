@@ -311,18 +311,24 @@ typedef void (*ngx_http_upstream_handler_pt)(ngx_http_request_t *r,
 
 
 struct ngx_http_upstream_s {
+    // 读事件的回调函数，每个阶段对应不能的读回调函数
     ngx_http_upstream_handler_pt     read_event_handler;
+    // 写事件的回调函数，每个阶段对应不能的写回调函数
     ngx_http_upstream_handler_pt     write_event_handler;
-
+    // 主动向upstream发起的连接
     ngx_peer_connection_t            peer;
-
+    // 当向下游客户端转发响应时，如果打开了缓存并且认为上游网速更快(conf配置中的buffering为1)，
+    // 这时会使用pipe成员来转发响应。在使用这种方式的时候，必须由HTTP模块在使用upstream机制
+    // 前构造pipe结构体，否则会出现严重的coredump
     ngx_event_pipe_t                *pipe;
 
     ngx_chain_t                     *request_bufs;
 
+    // 定义了向下游发送响应的方式
     ngx_output_chain_ctx_t           output;
     ngx_chain_writer_ctx_t           writer;
 
+    // 使用upstream机制时的各种配置
     ngx_http_upstream_conf_t        *conf;
     ngx_http_upstream_srv_conf_t    *upstream;
 #if (NGX_HTTP_CACHE)
@@ -347,19 +353,45 @@ struct ngx_http_upstream_s {
     ngx_chain_t                     *busy_bufs;
     ngx_chain_t                     *free_bufs;
 
+    /*
+     * 处理包体前的初始化方法；
+     * 其中data参数用于传递用户数据结构，就是下面成员input_filter_ctx
+     */
     ngx_int_t                      (*input_filter_init)(void *data);
+    /*
+     * 处理包体的方法；
+     * 其中data参数用于传递用户数据结构，就是下面成员input_filter_ctx，
+     * bytes表示本次接收到包体的长度；
+     */
     ngx_int_t                      (*input_filter)(void *data, ssize_t bytes);
+    /* 用于传递HTTP自定义的数据结构 */
     void                            *input_filter_ctx;
 
 #if (NGX_HTTP_CACHE)
     ngx_int_t                      (*create_key)(ngx_http_request_t *r);
 #endif
+    /* HTTP模块实现的create_request方法用于构造发往上游服务器的请求 */
     ngx_int_t                      (*create_request)(ngx_http_request_t *r);
+    /* 与上游服务器的通信失败后，若想再次向上游服务器发起连接，则调用该函数 */
     ngx_int_t                      (*reinit_request)(ngx_http_request_t *r);
+    /*
+     * 解析上游服务器返回的响应包头，该函数返回四个值中的一个：
+     * NGX_AGAIN                            表示包头没有接收完整；
+     * NGX_HTTP_UPSTREAM_INVALID_HEADER     表示包头不合法；
+     * NGX_ERROR                            表示出现错误；
+     * NGX_OK                               表示解析到完整的包头；
+     */
     ngx_int_t                      (*process_header)(ngx_http_request_t *r);
+    /* 当客户端放弃请求时被调用，由于系统会自动关闭连接，因此，该函数不会进行任何具体操作 */
     void                           (*abort_request)(ngx_http_request_t *r);
+    /* 结束upstream请求时会调用该函数 */
     void                           (*finalize_request)(ngx_http_request_t *r,
                                          ngx_int_t rc);
+    /*
+     * 在上游返回的响应出现location或者refresh头部表示重定向时，
+     * 会通过ngx_http_upstream_process_headers方法调用到可由HTTP模块
+     * 实现的rewrite_redirect方法；
+     */
     ngx_int_t                      (*rewrite_redirect)(ngx_http_request_t *r,
                                          ngx_table_elt_t *h, size_t prefix);
     ngx_int_t                      (*rewrite_cookie)(ngx_http_request_t *r,

@@ -121,7 +121,7 @@ typedef enum {
 struct ngx_connection_s {
     // 连接相关数据存放在这里
     // 在连接未使用时，data成员用于充当连接池中空闲链表中的next指针。
-    // 当连接被使用时，在HTTP框架中，指向ngx_http_request_t结构体
+    // 当连接被使用时，在HTTP框架中，指向ngx_http_connection_t结构体
     void               *data;
     // 对应的读事件
     ngx_event_t        *read;
