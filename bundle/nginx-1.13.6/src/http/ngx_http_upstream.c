@@ -546,7 +546,7 @@ ngx_http_upstream_init(ngx_http_request_t *r)
     ngx_http_upstream_init_request(r);
 }
 
-
+// 初始化upstream相关的request结构体
 static void
 ngx_http_upstream_init_request(ngx_http_request_t *r)
 {
@@ -1256,7 +1256,7 @@ failed:
     }
 }
 
-
+// 接收下游客户端请求的回调函数
 static void
 ngx_http_upstream_handler(ngx_event_t *ev)
 {
@@ -1498,7 +1498,7 @@ ngx_http_upstream_check_broken_connection(ngx_http_request_t *r,
     }
 }
 
-
+// 向upstream发起连接
 static void
 ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
 {
@@ -1569,6 +1569,7 @@ ngx_http_upstream_connect(ngx_http_request_t *r, ngx_http_upstream_t *u)
 
     /* rc == NGX_OK || rc == NGX_AGAIN || rc == NGX_DONE */
 
+    // 下面是rc == NGX_OK || rc == NGX_AGAIN || rc == NGX_DONE的情况
     c = u->peer.connection;
 
     c->data = r;
@@ -2115,7 +2116,7 @@ ngx_http_upstream_send_request(ngx_http_request_t *r, ngx_http_upstream_t *u,
     }
 }
 
-
+// 发送请求给upstream服务器
 static ngx_int_t
 ngx_http_upstream_send_request_body(ngx_http_request_t *r,
     ngx_http_upstream_t *u, ngx_uint_t do_write)
@@ -4374,7 +4375,7 @@ ngx_http_upstream_dummy_handler(ngx_http_request_t *r, ngx_http_upstream_t *u)
                    "http upstream dummy handler");
 }
 
-
+// 尝试一组upstream中的下一个server
 static void
 ngx_http_upstream_next(ngx_http_request_t *r, ngx_http_upstream_t *u,
     ngx_uint_t ft_type)
@@ -4387,6 +4388,7 @@ ngx_http_upstream_next(ngx_http_request_t *r, ngx_http_upstream_t *u,
 
     if (u->peer.sockaddr) {
 
+        // 只要上游应答不是404或者403都一致认为是出错了
         if (ft_type == NGX_HTTP_UPSTREAM_FT_HTTP_403
             || ft_type == NGX_HTTP_UPSTREAM_FT_HTTP_404)
         {
@@ -4400,6 +4402,7 @@ ngx_http_upstream_next(ngx_http_request_t *r, ngx_http_upstream_t *u,
         u->peer.sockaddr = NULL;
     }
 
+    // 连接超时
     if (ft_type == NGX_HTTP_UPSTREAM_FT_TIMEOUT) {
         ngx_log_error(NGX_LOG_ERR, r->connection->log, NGX_ETIMEDOUT,
                       "upstream timed out");
@@ -4457,7 +4460,7 @@ ngx_http_upstream_next(ngx_http_request_t *r, ngx_http_upstream_t *u,
         ft_type |= NGX_HTTP_UPSTREAM_FT_NON_IDEMPOTENT;
     }
 
-    if (u->peer.tries == 0
+    if (u->peer.tries == 0  // tries为0说明超过最大尝试次数
         || ((u->conf->next_upstream & ft_type) != ft_type)
         || (u->request_sent && r->request_body_no_buffering)
         || (timeout && ngx_current_msec - u->peer.start_time >= timeout))
@@ -4492,6 +4495,7 @@ ngx_http_upstream_next(ngx_http_request_t *r, ngx_http_upstream_t *u,
         }
 #endif
 
+        // 以上任何一种情况都认为是请求出错了
         ngx_http_upstream_finalize_request(r, u, status);
         return;
     }
