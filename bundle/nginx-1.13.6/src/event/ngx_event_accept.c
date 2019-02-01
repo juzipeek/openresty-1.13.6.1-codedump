@@ -642,7 +642,8 @@ ngx_event_recvmsg(ngx_event_t *ev)
 
 #endif
 
-
+// 尝试拿到accept锁的所有权，注意：拿不到不会返回error
+// 拿到与否需要判断ngx_accept_mutex_held全局变量
 ngx_int_t
 ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
 {
@@ -651,10 +652,12 @@ ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
         ngx_log_debug0(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                        "accept mutex locked");
 
+        // 如果已经是拿到锁的
         if (ngx_accept_mutex_held && ngx_accept_events == 0) {
             return NGX_OK;
         }
 
+        // 把server的监听fd加入epoll读事件中
         if (ngx_enable_accept_events(cycle) == NGX_ERROR) {
             ngx_shmtx_unlock(&ngx_accept_mutex);
             return NGX_ERROR;
@@ -669,18 +672,21 @@ ngx_trylock_accept_mutex(ngx_cycle_t *cycle)
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "accept mutex lock failed: %ui", ngx_accept_mutex_held);
 
+    // 尝试拿accept锁失败，但是之前已经置位了ngx_accept_mutex_held，说明上一次是拿到的
     if (ngx_accept_mutex_held) {
+        // 禁用监听fd事件
         if (ngx_disable_accept_events(cycle, 0) == NGX_ERROR) {
             return NGX_ERROR;
         }
 
+        // 取消拿到accept锁标志位
         ngx_accept_mutex_held = 0;
     }
 
     return NGX_OK;
 }
 
-
+// 将监听fd加入epoll的读中
 static ngx_int_t
 ngx_enable_accept_events(ngx_cycle_t *cycle)
 {

@@ -19,8 +19,10 @@
  */
 #define NGX_MAX_ALLOC_FROM_POOL  (ngx_pagesize - 1)
 
+// 默认一个pool大小
 #define NGX_DEFAULT_POOL_SIZE    (16 * 1024)
 
+// pool空间对齐字节数
 #define NGX_POOL_ALIGNMENT       16
 #define NGX_MIN_POOL_SIZE                                                     \
     ngx_align((sizeof(ngx_pool_t) + 2 * sizeof(ngx_pool_large_t)),            \
@@ -40,23 +42,32 @@ struct ngx_pool_cleanup_s {
 
 typedef struct ngx_pool_large_s  ngx_pool_large_t;
 
+// 管理超大空间的结构体
 struct ngx_pool_large_s {
+    // 指向下一个指针
     ngx_pool_large_t     *next;
+    // 直接指向内存区域的指针
     void                 *alloc;
 };
 
-
+// 管理内存池的meta数据
 typedef struct {
+    // 指向当前可用空间
     u_char               *last;
+    // 指向最后的空间
     u_char               *end;
+    // 指向下一个指针
     ngx_pool_t           *next;
+    // 分配失败次数
     ngx_uint_t            failed;
 } ngx_pool_data_t;
 
 
 struct ngx_pool_s {
     ngx_pool_data_t       d;
+    // 最大大小，超过这个就上large去分配
     size_t                max;
+    // 当前使用的pool
     ngx_pool_t           *current;
     ngx_chain_t          *chain;
     ngx_pool_large_t     *large;

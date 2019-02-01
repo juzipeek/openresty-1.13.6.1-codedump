@@ -51,7 +51,9 @@ ngx_atomic_t         *ngx_connection_counter = &connection_counter;
 ngx_atomic_t         *ngx_accept_mutex_ptr;
 ngx_shmtx_t           ngx_accept_mutex;
 ngx_uint_t            ngx_use_accept_mutex;
+// 
 ngx_uint_t            ngx_accept_events;
+// 是否拿到accept锁
 ngx_uint_t            ngx_accept_mutex_held;
 ngx_msec_t            ngx_accept_mutex_delay;
 ngx_int_t             ngx_accept_disabled;
@@ -230,44 +232,58 @@ ngx_process_events_and_timers(ngx_cycle_t *cycle)
             ngx_accept_disabled--;
 
         } else {
+            // 尝试拿到accept锁
             if (ngx_trylock_accept_mutex(cycle) == NGX_ERROR) {
+                // 返回error意味着中间出错，而不是拿不到accept锁
+                // ngx_accept_mutex_held变量用于保存有没有拿到锁
                 return;
             }
 
             if (ngx_accept_mutex_held) {
+                // 拿到锁的情况
                 flags |= NGX_POST_EVENTS;
 
             } else {
+                // 拿不到锁
                 if (timer == NGX_TIMER_INFINITE
                     || timer > ngx_accept_mutex_delay)
                 {
+                    // 最多等待ngx_accept_mutex_delay时间
                     timer = ngx_accept_mutex_delay;
                 }
             }
         }
     }
 
+    // 开始处理事件时记录时间
     delta = ngx_current_msec;
 
+    // 处理事件
     (void) ngx_process_events(cycle, timer, flags);
 
+    // 记录处理事件花费的时间
     delta = ngx_current_msec - delta;
 
     ngx_log_debug1(NGX_LOG_DEBUG_EVENT, cycle->log, 0,
                    "timer delta: %M", delta);
 
+    // 处理接收新请求的事件（如果有的话）
     ngx_event_process_posted(cycle, &ngx_posted_accept_events);
 
     if (ngx_accept_mutex_held) {
+        // 如果前面拿到了accept锁，这里可以释放了
         ngx_shmtx_unlock(&ngx_accept_mutex);
     }
 
     if (delta) {
+        // 处理过期事件
         ngx_event_expire_timers();
     }
 
+    // 处理除了accept新连接之外的其它post事件
     ngx_event_process_posted(cycle, &ngx_posted_events);
 
+    // 处理ngx_posted_delayed_events事件
     while (!ngx_queue_empty(&ngx_posted_delayed_events)) {
         q = ngx_queue_head(&ngx_posted_delayed_events);
 

@@ -893,12 +893,14 @@ ngx_epoll_process_events(ngx_cycle_t *cycle, ngx_msec_t timer, ngx_uint_t flags)
             rev->ready = 1;
 
             if (flags & NGX_POST_EVENTS) {
+                // 有NGX_POST_EVENTS标志位的情况，将accept事件放到ngx_posted_accept_events队列中
                 queue = rev->accept ? &ngx_posted_accept_events
                                     : &ngx_posted_events;
 
                 ngx_post_event(rev, queue);
 
             } else {
+                // 否则直接处理
                 rev->handler(rev);
             }
         }

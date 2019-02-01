@@ -156,23 +156,28 @@ ngx_palloc_small(ngx_pool_t *pool, size_t size, ngx_uint_t align)
 
     p = pool->current;
 
+    // 遍历当前的pool查找是否有合适大小的pool
     do {
         m = p->d.last;
 
+        // 将尺寸对齐
         if (align) {
             m = ngx_align_ptr(m, NGX_ALIGNMENT);
         }
 
+        // 如果满足大小就直接返回
         if ((size_t) (p->d.end - m) >= size) {
             p->d.last = m + size;
 
             return m;
         }
 
+        // 否则查找下一个
         p = p->d.next;
 
     } while (p);
 
+    // 找不到分配新的pool
     return ngx_palloc_block(pool, size);
 }
 
@@ -201,8 +206,10 @@ ngx_palloc_block(ngx_pool_t *pool, size_t size)
     m = ngx_align_ptr(m, NGX_ALIGNMENT);
     new->d.last = m + size;
 
+    // 由于前面查找失败了才需要分配新的pool，所以遍历前面的pool递增失败计数
     for (p = pool->current; p->d.next; p = p->d.next) {
         if (p->d.failed++ > 4) {
+            // 超过4次失败了，将current指向链表下一个
             pool->current = p->d.next;
         }
     }

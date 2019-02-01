@@ -84,7 +84,7 @@ struct ngx_command_s {
     char               *(*set)(ngx_conf_t *cf, ngx_command_t *cmd, void *conf);
     // 在配置文件中的偏移量
     ngx_uint_t            conf;
-    // 通常用于使用预设的解析方法解析配置项
+    // 该command修改的成员在在模块ctx数据结构中的偏移量，通过这个偏移量拿到ctx的成员指针进行读写
     ngx_uint_t            offset;
     void                 *post;
 };
