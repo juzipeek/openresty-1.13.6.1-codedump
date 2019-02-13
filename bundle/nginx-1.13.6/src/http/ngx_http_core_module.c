@@ -951,8 +951,10 @@ ngx_http_core_find_config_phase(ngx_http_request_t *r,
     r->content_handler = NULL;
     r->uri_changed = 0;
 
+    // 查询location
     rc = ngx_http_core_find_location(r);
 
+    // 查询失败
     if (rc == NGX_ERROR) {
         ngx_http_finalize_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
         return NGX_OK;
@@ -991,6 +993,7 @@ ngx_http_core_find_config_phase(ngx_http_request_t *r,
         return NGX_OK;
     }
 
+    // 查询成功，保存location
     if (rc == NGX_DONE) {
         ngx_http_clear_location(r);
 
@@ -1329,11 +1332,11 @@ ngx_http_update_location_config(ngx_http_request_t *r)
 
 
 /*
- * NGX_OK       - exact or regex match
- * NGX_DONE     - auto redirect
- * NGX_AGAIN    - inclusive match
- * NGX_ERROR    - regex error
- * NGX_DECLINED - no match
+ * NGX_OK       - exact or regex match 精确匹配或者匹配了正则location
+ * NGX_DONE     - auto redirect        重定向
+ * NGX_AGAIN    - inclusive match      inclusive匹配
+ * NGX_ERROR    - regex error          正则匹配失败
+ * NGX_DECLINED - no match             找不到匹配关系
  */
 
 static ngx_int_t
@@ -1407,10 +1410,10 @@ ngx_http_core_find_location(ngx_http_request_t *r)
 
 
 /*
- * NGX_OK       - exact match
- * NGX_DONE     - auto redirect
- * NGX_AGAIN    - inclusive match
- * NGX_DECLINED - no match
+ * NGX_OK       - exact match       精确匹配
+ * NGX_DONE     - auto redirect     重定向
+ * NGX_AGAIN    - inclusive match   包含匹配
+ * NGX_DECLINED - no match          找不到匹配关系
  */
 
 static ngx_int_t
@@ -1421,6 +1424,7 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
     size_t      len, n;
     ngx_int_t   rc, rv;
 
+    // 先保存下来待查找的URI的长度和字符串
     len = r->uri.len;
     uri = r->uri.data;
 
@@ -1436,24 +1440,30 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
                        "test location: \"%*s\"",
                        (size_t) node->len, node->name);
 
+        // 取长度小的来进行查找
         n = (len <= (size_t) node->len) ? len : node->len;
 
         rc = ngx_filename_cmp(uri, node->name, n);
 
-        if (rc != 0) {
+        if (rc != 0) {  // 不为0，要进入子树进行查找
+            // 根据前面的字符串对比结果来区分是查找左右子树
             node = (rc < 0) ? node->left : node->right;
 
             continue;
         }
 
-        if (len > (size_t) node->len) {
+        // 到这里就是rc为0的情况
+        
+        if (len > (size_t) node->len) { // 如果URI更长
 
-            if (node->inclusive) {
+            if (node->inclusive) {  // 如果node节点有包含关系
 
                 r->loc_conf = node->inclusive->loc_conf;
                 rv = NGX_AGAIN;
 
+                // 进入包含关系的子树中继续查找
                 node = node->tree;
+                // 同时修改查找的长度和uri
                 uri += n;
                 len -= n;
 
@@ -1462,23 +1472,25 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
 
             /* exact only */
 
+            // 到了这里只能精确匹配了，进入右子树查找
             node = node->right;
 
             continue;
         }
 
-        if (len == (size_t) node->len) {
+        if (len == (size_t) node->len) {  // 两者长度一样
 
-            if (node->exact) {
+            if (node->exact) {  // 精确查找
                 r->loc_conf = node->exact->loc_conf;
                 return NGX_OK;
 
-            } else {
+            } else {  // 否则查找包含关系
                 r->loc_conf = node->inclusive->loc_conf;
                 return NGX_AGAIN;
             }
         }
 
+        // 到了这里就是 len < node->len的情况
         /* len < node->len */
 
         if (len + 1 == (size_t) node->len && node->auto_redirect) {
@@ -1488,6 +1500,7 @@ ngx_http_core_find_static_location(ngx_http_request_t *r,
             rv = NGX_DONE;
         }
 
+        // 进入左子树查找
         node = node->left;
     }
 }

@@ -214,6 +214,8 @@ typedef struct {
     ngx_array_t               *ports;
 
     // 用于在HTTP框架初始化时帮助各个HTTP模块在任意阶段中添加HTTP处理方法
+    // 由11个成员组成（因为有11个HTTP阶段）的数组，其中每个成员对应一个HTTP阶段。
+    // 在HTTP框架初始化完毕之后，运行过程中的phases数组是无用的。
     ngx_http_phase_t           phases[NGX_HTTP_LOG_PHASE + 1];
 } ngx_http_core_main_conf_t;
 
@@ -493,11 +495,15 @@ struct ngx_http_location_tree_node_s {
     ngx_http_location_tree_node_t   *right;
     ngx_http_location_tree_node_t   *tree;
 
+    // 完全匹配的类型
     ngx_http_core_loc_conf_t        *exact;
+    // 无法完全匹配的类型
     ngx_http_core_loc_conf_t        *inclusive;
-
+    // 自动重定向标志
     u_char                           auto_redirect;
+    // name字符串长度
     u_char                           len;
+    // 指向location对应的URI匹配表达式
     u_char                           name[1];
 };
 

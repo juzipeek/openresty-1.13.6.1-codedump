@@ -1002,6 +1002,7 @@ ngx_http_process_request_line(ngx_event_t *rev)
                 r->http_protocol.len = r->request_end - r->http_protocol.data;
             }
 
+            // 处理请求uri
             if (ngx_http_process_request_uri(r) != NGX_OK) {
                 return;
             }
@@ -1429,9 +1430,11 @@ ngx_http_read_request_header(ngx_http_request_t *r)
     }
 
     if (rev->ready) {
+        // 如果ready意味着由读事件了，可以接着读
         n = c->recv(c, r->header_in->last,
                     r->header_in->end - r->header_in->last);
     } else {
+        // 否则等待下一次被唤醒
         n = NGX_AGAIN;
     }
 
@@ -1442,6 +1445,7 @@ ngx_http_read_request_header(ngx_http_request_t *r)
             ngx_add_timer(rev, cscf->client_header_timeout);
         }
 
+        // 添加读事件
         if (ngx_handle_read_event(rev, 0) != NGX_OK) {
             ngx_http_close_request(r, NGX_HTTP_INTERNAL_SERVER_ERROR);
             return NGX_ERROR;
@@ -1817,6 +1821,7 @@ ngx_http_process_multi_header_lines(ngx_http_request_t *r, ngx_table_elt_t *h,
     return NGX_OK;
 }
 
+// 处理请求头
 ngx_int_t
 ngx_http_process_request_header(ngx_http_request_t *r)
 {

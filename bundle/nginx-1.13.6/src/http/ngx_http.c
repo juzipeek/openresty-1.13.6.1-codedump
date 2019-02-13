@@ -688,6 +688,7 @@ ngx_http_init_locations(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
         return NGX_OK;
     }
 
+    // 先对location队列进行排序
     ngx_queue_sort(locations, ngx_http_cmp_locations);
 
     named = NULL;
@@ -733,11 +734,13 @@ ngx_http_init_locations(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
             continue;
         }
 
+        // 到了noname，终止循环，即将队列拆分成有noname和没有noname两个大类型
         if (clcf->noname) {
             break;
         }
     }
 
+    // 如果退出循环的时候locations队列不为空，说明中间有noname类型的，这里做分割，将有noname的分出来
     if (q != ngx_queue_sentinel(locations)) {
         ngx_queue_split(locations, q, &tail);
     }
@@ -749,6 +752,7 @@ ngx_http_init_locations(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
             return NGX_ERROR;
         }
 
+        // 将named的location放在named_locations中
         cscf->named_locations = clcfp;
 
         for (q = named;
@@ -762,11 +766,12 @@ ngx_http_init_locations(ngx_conf_t *cf, ngx_http_core_srv_conf_t *cscf,
 
         *clcfp = NULL;
 
+        // 将named location从队列中分割出来
         ngx_queue_split(locations, named, &tail);
     }
 
 #if (NGX_PCRE)
-
+    // 将正则的location从队列中分割出来
     if (regex) {
 
         clcfp = ngx_palloc(cf->pool,
@@ -889,7 +894,10 @@ ngx_http_add_location(ngx_conf_t *cf, ngx_queue_t **locations,
     return NGX_OK;
 }
 
-
+// 对比location配置的比较函数
+// 返回1表示one大于two；0表示两者相等；-1表示one小于two
+// 从下面的代码可以看到，location之间的先后顺序为：
+// 包含关系 > exact_match > regex > named > noname
 static ngx_int_t
 ngx_http_cmp_locations(const ngx_queue_t *one, const ngx_queue_t *two)
 {
@@ -903,6 +911,7 @@ ngx_http_cmp_locations(const ngx_queue_t *one, const ngx_queue_t *two)
     first = lq1->exact ? lq1->exact : lq1->inclusive;
     second = lq2->exact ? lq2->exact : lq2->inclusive;
 
+    // 对比有无noname
     if (first->noname && !second->noname) {
         /* shift no named locations to the end */
         return 1;
@@ -918,6 +927,7 @@ ngx_http_cmp_locations(const ngx_queue_t *one, const ngx_queue_t *two)
         return 0;
     }
 
+    // 对比有无named
     if (first->named && !second->named) {
         /* shift named locations to the end */
         return 1;
@@ -933,7 +943,7 @@ ngx_http_cmp_locations(const ngx_queue_t *one, const ngx_queue_t *two)
     }
 
 #if (NGX_PCRE)
-
+    // 对比有无正则
     if (first->regex && !second->regex) {
         /* shift the regex matches to the end */
         return 1;
@@ -951,6 +961,7 @@ ngx_http_cmp_locations(const ngx_queue_t *one, const ngx_queue_t *two)
 
 #endif
 
+    // 对比location字符串
     rc = ngx_filename_cmp(first->name.data, second->name.data,
                           ngx_min(first->name.len, second->name.len) + 1);
 
@@ -1012,6 +1023,7 @@ ngx_http_create_locations_list(ngx_queue_t *locations, ngx_queue_t *q)
     ngx_queue_t                *x, tail;
     ngx_http_location_queue_t  *lq, *lx;
 
+    // 由于本函数存在递归调用，所以这个判断是递归的终止条件
     if (q == ngx_queue_last(locations)) {
         return;
     }
@@ -1019,6 +1031,7 @@ ngx_http_create_locations_list(ngx_queue_t *locations, ngx_queue_t *q)
     lq = (ngx_http_location_queue_t *) q;
 
     if (lq->inclusive == NULL) {
+        // 如果不是inclusive类型的location，直接跳过，继续队列中下一个location的处理
         ngx_http_create_locations_list(locations, ngx_queue_next(q));
         return;
     }
@@ -1026,12 +1039,16 @@ ngx_http_create_locations_list(ngx_queue_t *locations, ngx_queue_t *q)
     len = lq->name->len;
     name = lq->name->data;
 
+    // 从该location的下一个元素开始遍历队列
     for (x = ngx_queue_next(q);
          x != ngx_queue_sentinel(locations);
          x = ngx_queue_next(x))
     {
         lx = (ngx_http_location_queue_t *) x;
 
+        // 找到第一个不以q的location做为前缀的location就退出循环
+        // 比如当前队列location为：/a /ab /abc /b
+        // 这里的q就是/a，x就是/b，中间的/ab和/abc都是以/a为前缀的，不会终止循环
         if (len > lx->name->len
             || ngx_filename_cmp(name, lx->name->data, len) != 0)
         {
@@ -1041,12 +1058,16 @@ ngx_http_create_locations_list(ngx_queue_t *locations, ngx_queue_t *q)
 
     q = ngx_queue_next(q);
 
-    if (q == x) {
+    if (q == x) { // 如果x就是q的下一个元素，说明没有找到前缀匹配的，那么直接进入x进行下次递归调用
         ngx_http_create_locations_list(locations, x);
         return;
     }
 
+    // 到了这里说明前面找到有前缀匹配的location了
+    
+    // 这里将与q相同前缀的节点，分离出队列
     ngx_queue_split(locations, q, &tail);
+    // 然后加入到q的list链表中
     ngx_queue_add(&lq->list, &tail);
 
     if (x == ngx_queue_sentinel(locations)) {
@@ -1054,11 +1075,15 @@ ngx_http_create_locations_list(ngx_queue_t *locations, ngx_queue_t *q)
         return;
     }
 
+    // 将x从队列中分离出来
     ngx_queue_split(&lq->list, x, &tail);
+    // 放回到location队列中
     ngx_queue_add(locations, &tail);
 
+    // 对lq->list做相同的操作
     ngx_http_create_locations_list(&lq->list, ngx_queue_head(&lq->list));
 
+    // 对从x开始的剩余节点做相同的操作
     ngx_http_create_locations_list(locations, x);
 }
 
@@ -1077,9 +1102,11 @@ ngx_http_create_locations_tree(ngx_conf_t *cf, ngx_queue_t *locations,
     ngx_http_location_queue_t      *lq;
     ngx_http_location_tree_node_t  *node;
 
+    // 快速确定中间节点的位置，保存到q中
     q = ngx_queue_middle(locations);
 
     lq = (ngx_http_location_queue_t *) q;
+    // 左边元素的数量
     len = lq->name->len - prefix;
 
     node = ngx_palloc(cf->pool,
@@ -1100,16 +1127,20 @@ ngx_http_create_locations_tree(ngx_conf_t *cf, ngx_queue_t *locations,
     node->len = (u_char) len;
     ngx_memcpy(node->name, &lq->name->data[prefix], len);
 
+    // 从中间节点将location分为两部分
     ngx_queue_split(locations, q, &tail);
 
+    // 如果分离完毕location队列为空
     if (ngx_queue_empty(locations)) {
         /*
          * ngx_queue_split() insures that if left part is empty,
          * then right one is empty too
          */
+        // 直接跳到构造inclusive类型的子树
         goto inclusive;
     }
 
+    // 构造左子树
     node->left = ngx_http_create_locations_tree(cf, locations, prefix);
     if (node->left == NULL) {
         return NULL;
@@ -1121,13 +1152,16 @@ ngx_http_create_locations_tree(ngx_conf_t *cf, ngx_queue_t *locations,
         goto inclusive;
     }
 
+    // 构造右子树
     node->right = ngx_http_create_locations_tree(cf, &tail, prefix);
     if (node->right == NULL) {
         return NULL;
     }
 
 inclusive:
+    // 到这里构造inclusive类型的树保存到tree成员中
 
+    // list为空说明没有inclusive类型的location了
     if (ngx_queue_empty(&lq->list)) {
         return node;
     }
