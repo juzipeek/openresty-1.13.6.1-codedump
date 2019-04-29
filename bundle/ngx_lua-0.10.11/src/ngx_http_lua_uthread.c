@@ -45,7 +45,7 @@ ngx_http_lua_inject_uthread_api(ngx_log_t *log, lua_State *L)
     lua_setfield(L, -2, "thread");
 }
 
-
+// 创建用户级别的线程
 static int
 ngx_http_lua_uthread_spawn(lua_State *L)
 {
@@ -66,10 +66,11 @@ ngx_http_lua_uthread_spawn(lua_State *L)
         return luaL_error(L, "no request ctx found");
     }
 
+    // 创建协程，返回到coctx中
     ngx_http_lua_coroutine_create_helper(L, r, ctx, &coctx);
 
     /* anchor the newly created coroutine into the Lua registry */
-
+    // 将新创建的协程放入lua registry表中
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
     lua_rawget(L, LUA_REGISTRYINDEX);
     lua_pushvalue(L, -2);
@@ -85,6 +86,7 @@ ngx_http_lua_uthread_spawn(lua_State *L)
     ctx->uthreads++;
 
     coctx->co_status = NGX_HTTP_LUA_CO_RUNNING;
+    // 设置操作为用户协程执行
     ctx->co_op = NGX_HTTP_LUA_USER_THREAD_RESUME;
 
     ctx->cur_co_ctx->thread_spawn_yielded = 1;
@@ -93,13 +95,16 @@ ngx_http_lua_uthread_spawn(lua_State *L)
         return luaL_error(L, "no memory");
     }
 
+    // 设置父协程
     coctx->parent_co_ctx = ctx->cur_co_ctx;
+    // 当前运行协程修改为新创建的协程，这样让出执行权之后就有新协程继续执行
     ctx->cur_co_ctx = coctx;
 
     ngx_http_lua_probe_user_thread_spawn(r, L, coctx->co);
 
     dd("yielding with arg %s, top=%d, index-1:%s", luaL_typename(L, -1),
        (int) lua_gettop(L), luaL_typename(L, 1));
+    // 让出执行权
     return lua_yield(L, 1);
 }
 

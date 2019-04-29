@@ -70,6 +70,7 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
     lua_State                     *co;  /* new coroutine to be created */
     ngx_http_lua_co_ctx_t         *coctx; /* co ctx for the new coroutine */
 
+    // 检查栈+1位置是不是函数
     luaL_argcheck(L, lua_isfunction(L, 1) && !lua_iscfunction(L, 1), 1,
                   "Lua function expected");
 
@@ -80,15 +81,18 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
                                | NGX_HTTP_LUA_CONTEXT_SSL_CERT
                                | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH);
 
+    // vm是进程级别的vm，而传入的L是父vm，可能是进程vm也可能是父coroutine
     vm = ngx_http_lua_get_lua_vm(r, ctx);
 
     /* create new coroutine on root Lua state, so it always yields
      * to main Lua thread
      */
+    // 创建coroutine
     co = lua_newthread(vm);
 
     ngx_http_lua_probe_user_coroutine_create(r, L, co);
 
+    // 拿到协程上下文结构体
     coctx = ngx_http_lua_get_co_ctx(co, ctx);
     if (coctx == NULL) {
         coctx = ngx_http_lua_create_co_ctx(r, ctx);
@@ -102,16 +106,23 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
     }
 
     coctx->co = co;
+    // 初始状态是suspend
     coctx->co_status = NGX_HTTP_LUA_CO_SUSPENDED;
 
     /* make new coroutine share globals of the parent coroutine.
      * NOTE: globals don't have to be separated! */
+    // 以下是拷贝父coroutine的全局表
+    // 父coroutine先取出来放到栈顶
     ngx_http_lua_get_globals_table(L);
+    // move到子协程栈顶
     lua_xmove(L, co, 1);
+    // 保存到子协程中
     ngx_http_lua_set_globals_table(co);
 
+    // move子协程到L
     lua_xmove(vm, L, 1);    /* move coroutine from main thread to L */
 
+    // move入口函数到子协程中
     lua_pushvalue(L, 1);    /* copy entry function to top of L*/
     lua_xmove(L, co, 1);    /* move entry function from L to co */
 
@@ -126,7 +137,7 @@ ngx_http_lua_coroutine_create_helper(lua_State *L, ngx_http_request_t *r,
     return 1;    /* return new coroutine to Lua */
 }
 
-
+// 在协程内进行了resume操作
 static int
 ngx_http_lua_coroutine_resume(lua_State *L)
 {
@@ -136,15 +147,18 @@ ngx_http_lua_coroutine_resume(lua_State *L)
     ngx_http_lua_co_ctx_t       *coctx;
     ngx_http_lua_co_ctx_t       *p_coctx; /* parent co ctx */
 
+    // 先转成协程
     co = lua_tothread(L, 1);
 
     luaL_argcheck(L, co, 1, "coroutine expected");
 
+    // 拿到当前的请求结构体
     r = ngx_http_lua_get_req(L);
     if (r == NULL) {
         return luaL_error(L, "no request found");
     }
 
+    // 根据请求拿到协程上下文
     ctx = ngx_http_get_module_ctx(r, ngx_http_lua_module);
     if (ctx == NULL) {
         return luaL_error(L, "no request ctx found");
@@ -157,11 +171,13 @@ ngx_http_lua_coroutine_resume(lua_State *L)
                                | NGX_HTTP_LUA_CONTEXT_SSL_CERT
                                | NGX_HTTP_LUA_CONTEXT_SSL_SESS_FETCH);
 
+    // 当前协程就是父协程结构体指针
     p_coctx = ctx->cur_co_ctx;
     if (p_coctx == NULL) {
         return luaL_error(L, "no parent co ctx found");
     }
 
+    // 拿到当前协程上下文
     coctx = ngx_http_lua_get_co_ctx(co, ctx);
     if (coctx == NULL) {
         return luaL_error(L, "no co ctx found");
@@ -180,12 +196,14 @@ ngx_http_lua_coroutine_resume(lua_State *L)
 
     p_coctx->co_status = NGX_HTTP_LUA_CO_NORMAL;
 
+    // 设置父协程指针
     coctx->parent_co_ctx = p_coctx;
 
     dd("set coroutine to running");
     coctx->co_status = NGX_HTTP_LUA_CO_RUNNING;
 
     ctx->co_op = NGX_HTTP_LUA_USER_CORO_RESUME;
+    // 切换当前协程指针为新创建的协程
     ctx->cur_co_ctx = coctx;
 
     /* yield and pass args to main thread, and resume target coroutine from

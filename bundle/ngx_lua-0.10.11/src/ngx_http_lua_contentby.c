@@ -61,16 +61,22 @@ ngx_http_lua_content_by_chunk(lua_State *L, ngx_http_request_t *r)
     }
 
     /*  move code closure to new coroutine */
+    // 把入口closure copy到协程中
     lua_xmove(L, co, 1);
 
     /*  set closure's env table to new coroutine's globals table */
+    // 然后把global表放到栈上，此时栈-2位置是前面copy过来的入口closure，栈-1位置是global表
     ngx_http_lua_get_globals_table(co);
+    // 因此这个操作就是把global表设置到closure的env表中
     lua_setfenv(co, -2);
 
     /*  save nginx request in coroutine globals table */
+    // 保存nginx的请求结构体到coroutine的global表中
     ngx_http_lua_set_req(co, r);
 
+    // 保存当前协程上下文信息
     ctx->cur_co_ctx = &ctx->entry_co_ctx;
+    // 协程
     ctx->cur_co_ctx->co = co;
     ctx->cur_co_ctx->co_ref = co_ref;
 #ifdef NGX_LUA_USE_ASSERT

@@ -346,6 +346,7 @@ typedef enum {
     NGX_HTTP_LUA_USER_CORO_NOP      = 0,
     NGX_HTTP_LUA_USER_CORO_RESUME   = 1,
     NGX_HTTP_LUA_USER_CORO_YIELD    = 2,
+    // 用户协程执行
     NGX_HTTP_LUA_USER_THREAD_RESUME = 3
 } ngx_http_lua_user_coro_op_t;
 

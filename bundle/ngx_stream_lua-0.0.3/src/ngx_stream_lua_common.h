@@ -305,8 +305,10 @@ typedef ngx_stream_lua_srv_conf_t ngx_stream_lua_loc_conf_t;
 
 typedef enum {
     NGX_STREAM_LUA_USER_CORO_NOP      = 0,
+    // 
     NGX_STREAM_LUA_USER_CORO_RESUME   = 1,
     NGX_STREAM_LUA_USER_CORO_YIELD    = 2,
+    // Lua代码中创建一个协程并且执行协程
     NGX_STREAM_LUA_USER_THREAD_RESUME = 3
 } ngx_stream_lua_user_coro_op_t;
 
@@ -332,11 +334,13 @@ struct ngx_stream_lua_posted_thread_s {
 
 
 
-
+// 存放Lua协程上下文信息的结构体
 struct ngx_stream_lua_co_ctx_s {
     void                    *data;      /* user state for cosockets */
 
+    // 协程指针
     lua_State               *co;
+    // 父协程上下文信息
     ngx_stream_lua_co_ctx_t   *parent_co_ctx;
 
     ngx_stream_lua_posted_thread_t    *zombie_child_threads;
@@ -363,18 +367,22 @@ struct ngx_stream_lua_co_ctx_s {
                                          from beging collected by the
                                          Lua GC */
 
+    // 是否被父线程等待退出
     unsigned                 waited_by_parent:1;  /* whether being waited by
                                                      a parent coroutine */
 
+    // 存储协程当前状态
     unsigned                 co_status:3;  /* the current coroutine's status */
 
     unsigned                 flushing:1; /* indicates whether the current
                                             coroutine is waiting for
                                             ngx.flush(true) */
 
+    // 存储是否是用户线程
     unsigned                 is_uthread:1; /* whether the current coroutine is
                                               a user thread */
 
+    // 为1的时候表示创建一个uthread
     unsigned                 thread_spawn_yielded:1; /* yielded from
                                                         the ngx.thread.spawn()
                                                         call */

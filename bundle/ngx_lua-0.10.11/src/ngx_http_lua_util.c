@@ -178,6 +178,7 @@ ngx_http_lua_set_path(ngx_cycle_t *cycle, lua_State *L, int tab_idx,
  *         | new table | <- top
  *         |    ...    |
  * */
+// 创建一个空的G表
 void
 ngx_http_lua_create_new_globals_table(lua_State *L, int narr, int nrec)
 {
@@ -301,7 +302,7 @@ ngx_http_lua_new_state(lua_State *parent_vm, ngx_cycle_t *cycle,
     return L;
 }
 
-
+// 创建一个lua coroutine来执行请求处理
 lua_State *
 ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
 {
@@ -311,8 +312,10 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                    "lua creating new thread");
 
+    // 拿到当前栈顶偏移量
     base = lua_gettop(L);
 
+    // 到registry表中查询ngx_http_lua_coroutines_key，返回结果在top - 1位置
     lua_pushlightuserdata(L, &ngx_http_lua_coroutines_key);
     lua_rawget(L, LUA_REGISTRYINDEX);
 
@@ -323,13 +326,18 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
      *  globals table.
      */
     /*  new globals table for coroutine */
+    // 创建一个coroutine的新的空表
     ngx_http_lua_create_new_globals_table(co, 0, 0);
 
+    // 创建一个空表
     lua_createtable(co, 0, 1);
+    // 得到这个coroutine的G表
     ngx_http_lua_get_globals_table(co);
+    // __index指向这个空表
     lua_setfield(co, -2, "__index");
+    // 元表指向这个空表
     lua_setmetatable(co, -2);
-
+    // 替换coroutine的GLOBAL表
     ngx_http_lua_set_globals_table(co);
     /*  }}} */
 
@@ -340,6 +348,7 @@ ngx_http_lua_new_thread(ngx_http_request_t *r, lua_State *L, int *ref)
         return NULL;
     }
 
+    // 恢复Lua栈
     lua_settop(L, base);
     return co;
 }
@@ -961,6 +970,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
                    r->main->count);
 
     /* set Lua VM panic handler */
+    // 注册panic回调函数（需要每创建一次coroutine都注册？？）
     lua_atpanic(L, ngx_http_lua_atpanic);
 
     dd("ctx = %p", ctx);
@@ -989,6 +999,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
             dd("cur co: %p", ctx->cur_co_ctx->co);
             dd("cur co status: %d", ctx->cur_co_ctx->co_status);
 
+            // 拿到当前的协程上下文结构体
             orig_coctx = ctx->cur_co_ctx;
 
 #ifdef NGX_LUA_USE_ASSERT
@@ -1007,6 +1018,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
             ngx_http_lua_assert(orig_coctx->co_top + nrets
                                 == lua_gettop(orig_coctx->co));
 
+            // 继续执行协程
             rv = lua_resume(orig_coctx->co, nrets);
 
 #if (NGX_PCRE)
@@ -1065,7 +1077,7 @@ ngx_http_lua_run_thread(lua_State *L, ngx_http_request_t *r,
 
                     return NGX_AGAIN;
 
-                case NGX_HTTP_LUA_USER_THREAD_RESUME:
+                case NGX_HTTP_LUA_USER_THREAD_RESUME:   // 这次执行协程的过程中创建了用户线程
 
                     ngx_log_debug0(NGX_LOG_DEBUG_HTTP, r->connection->log, 0,
                                    "lua user thread resume");

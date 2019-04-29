@@ -207,13 +207,16 @@ ngx_stream_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
 {
     ngx_int_t         rc;
 
+    // 创建ngx.socket表
     lua_createtable(L, 0, 4 /* nrec */);    /* ngx.socket */
 
+    // 首先注册ngx.socket.tcp和ngx.socket.stream都调用ngx_stream_lua_socket_tcp函数
     lua_pushcfunction(L, ngx_stream_lua_socket_tcp);
     lua_pushvalue(L, -1);
     lua_setfield(L, -3, "tcp");
     lua_setfield(L, -2, "stream");
 
+    // 这一段load一块字符串做什么没看懂
     {
         const char  buf[] = "local sock = ngx.socket.tcp()"
                             " local ok, err = sock:connect(...)"
@@ -234,7 +237,10 @@ ngx_stream_lua_inject_socket_tcp_api(ngx_log_t *log, lua_State *L)
     lua_setfield(L, -2, "socket");
 
 
-
+    // 以下这一大段代码做的事情：
+    // 创建一个与key &ngx_stream_lua_raw_req_socket_metatable_key关联的表，
+    // 表里面存放了所有TCP相关的函数，最后set到registry表中。
+    // 也就是说，在registry表中注册了一批TCP的方法。
     /* {{{raw req socket object metatable */
     lua_pushlightuserdata(L, &ngx_stream_lua_raw_req_socket_metatable_key);
     lua_createtable(L, 0 /* narr */, 6 /* nrec */);
@@ -393,9 +399,13 @@ ngx_stream_lua_socket_tcp(lua_State *L)
 
                                | NGX_STREAM_LUA_CONTEXT_TIMER);
 
+    // 创建一个空表
     lua_createtable(L, 5 /* narr */, 1 /* nrec */);
+    // 拿到socket元表
     lua_pushlightuserdata(L, &ngx_stream_lua_tcp_socket_metatable_key);
+    // 从registry表中获取socket元表
     lua_rawget(L, LUA_REGISTRYINDEX);
+    // 放入这个空表的元表
     lua_setmetatable(L, -2);
 
     dd("top: %d", lua_gettop(L));
@@ -4276,6 +4286,7 @@ ngx_stream_lua_req_socket(lua_State *L)
     ngx_stream_lua_check_context(L, ctx, NGX_STREAM_LUA_CONTEXT_CONTENT
                                  |NGX_STREAM_LUA_CONTEXT_PREREAD);
 
+    // 这里写死了raw为1了
     raw = 1;
 
 
@@ -4319,23 +4330,29 @@ ngx_stream_lua_req_socket(lua_State *L)
 
     }
 
+    // 创建该对象的元表
     lua_createtable(L, 3 /* narr */, 1 /* nrec */); /* the object */
 
+    // raw的情况下将ngx_stream_lua_raw_req_socket_metatable_key push进来，因为之前
+    // 用这个key存了tcp socket的对象
     if (raw) {
         lua_pushlightuserdata(L, &ngx_stream_lua_raw_req_socket_metatable_key);
-
     } else {
 
     }
 
+    // 从registry表中拿到之前注册的表
     lua_rawget(L, LUA_REGISTRYINDEX);
+    // 设置为元表
     lua_setmetatable(L, -2);
 
+    // 创建一个upstream相关的结构体
     u = lua_newuserdata(L, sizeof(ngx_stream_lua_socket_tcp_upstream_t));
     if (u == NULL) {
         return luaL_error(L, "no memory");
     }
 
+    // 拿到upstream相关的函数表
 #if 1
     lua_pushlightuserdata(L, &ngx_stream_lua_downstream_udata_metatable_key);
     lua_rawget(L, LUA_REGISTRYINDEX);

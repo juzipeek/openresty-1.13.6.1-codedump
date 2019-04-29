@@ -338,7 +338,7 @@ ngx_stream_lua_create_ctx(ngx_stream_session_t *r)
     return ctx;
 }
 
-
+// 拿到进程的Lua虚拟机
 static ngx_inline lua_State *
 ngx_stream_lua_get_lua_vm(ngx_stream_lua_request_t *r, ngx_stream_lua_ctx_t *ctx)
 {

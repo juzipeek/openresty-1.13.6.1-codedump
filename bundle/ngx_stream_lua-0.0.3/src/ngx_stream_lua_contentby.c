@@ -47,6 +47,7 @@ ngx_stream_lua_content_by_chunk(lua_State *L, ngx_stream_lua_request_t *r)
     ctx->entered_content_phase = 1;
 
     /*  {{{ new coroutine to handle request */
+    // 创建协程返回
     co = ngx_stream_lua_new_thread(r, L, &co_ref);
 
     if (co == NULL) {
@@ -59,15 +60,20 @@ ngx_stream_lua_content_by_chunk(lua_State *L, ngx_stream_lua_request_t *r)
     }
 
     /*  move code closure to new coroutine */
+    // 将lua虚拟机VM的入口closure move到新创建的协程上面，这样协程就有了虚拟机已经解析完毕的代码了
     lua_xmove(L, co, 1);
 
     /*  set closure's env table to new coroutine's globals table */
+    // 拿到全局表
     ngx_stream_lua_get_globals_table(co);
+    // 入口函数的环境表为全局表
     lua_setfenv(co, -2);
 
     /*  save nginx request in coroutine globals table */
+    // 保存nginx请求字段到协程中
     ngx_stream_lua_set_req(co, r);
 
+    // 保存当协程执行环境中
     ctx->cur_co_ctx = &ctx->entry_co_ctx;
     ctx->cur_co_ctx->co = co;
     ctx->cur_co_ctx->co_ref = co_ref;
@@ -118,9 +124,11 @@ ngx_stream_lua_content_by_chunk(lua_State *L, ngx_stream_lua_request_t *r)
         r->read_event_handler = ngx_stream_lua_block_reading;
     }
 
+    // 执行协程
     rc = ngx_stream_lua_run_thread(L, r, ctx, 0);
 
     if (rc == NGX_ERROR || rc >= NGX_OK) {
+        // 执行过程中出错了
         return rc;
     }
 
@@ -282,7 +290,7 @@ ngx_stream_lua_content_handler_inline(ngx_stream_lua_request_t *r)
     return ngx_stream_lua_content_by_chunk(L, r);
 }
 
-
+// 执行posted_threads里面的协程
 ngx_int_t
 ngx_stream_lua_content_run_posted_threads(lua_State *L, ngx_stream_lua_request_t *r,
     ngx_stream_lua_ctx_t *ctx, int n)
@@ -309,8 +317,10 @@ ngx_stream_lua_content_run_posted_threads(lua_State *L, ngx_stream_lua_request_t
             continue;
         }
 
+        // 切换当前协程指针为pt的协程
         ctx->cur_co_ctx = pt->co_ctx;
 
+        // 执行之
         rc = ngx_stream_lua_run_thread(L, r, ctx, 0);
 
         if (rc == NGX_AGAIN) {

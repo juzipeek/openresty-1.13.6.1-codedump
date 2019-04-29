@@ -160,7 +160,10 @@ ngx_stream_lua_set_path(ngx_cycle_t *cycle, lua_State *L, int tab_idx,
 void
 ngx_stream_lua_create_new_globals_table(lua_State *L, int narr, int nrec)
 {
+    // 创建一个空表
     lua_createtable(L, narr, nrec + 1);
+    // _G指向这个新的表
+    // 于是_G就是一个新创建的空表了
     lua_pushvalue(L, -1);
     lua_setfield(L, -2, "_G");
 }
@@ -290,11 +293,15 @@ ngx_stream_lua_new_thread(ngx_stream_lua_request_t *r, lua_State *L, int *ref)
     ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                    "lua creating new thread");
 
+    // 保存当前栈的基指针
     base = lua_gettop(L);
 
+    // push coroutine key进去
     lua_pushlightuserdata(L, &ngx_stream_lua_coroutines_key);
+    // 从registry表中查询
     lua_rawget(L, LUA_REGISTRYINDEX);
 
+    // 新创建一个thread
     co = lua_newthread(L);
 
     /*  {{{ inherit coroutine's globals to main thread's globals table
@@ -304,11 +311,15 @@ ngx_stream_lua_new_thread(ngx_stream_lua_request_t *r, lua_State *L, int *ref)
     /*  new globals table for coroutine */
     ngx_stream_lua_create_new_globals_table(co, 0, 0);
 
+    // 再创建一个新表
     lua_createtable(co, 0, 1);
+    // 拿到全局表 
     ngx_stream_lua_get_globals_table(co);
+    // 全局表的__index指向新创建的表
     lua_setfield(co, -2, "__index");
+    // 全局表的meta table指向新创建的表
     lua_setmetatable(co, -2);
-
+    // set 全局表回去
     ngx_stream_lua_set_globals_table(co);
     /*  }}} */
 
@@ -319,6 +330,7 @@ ngx_stream_lua_new_thread(ngx_stream_lua_request_t *r, lua_State *L, int *ref)
         return NULL;
     }
 
+    // 恢复base指针
     lua_settop(L, base);
     return co;
 }
@@ -435,6 +447,8 @@ ngx_stream_lua_init_registry(lua_State *L, ngx_log_t *log)
 
     /* {{{ register a table to anchor lua coroutines reliably:
      * {([int]ref) = [cort]} */
+    // registry表的&ngx_stream_lua_coroutines_key对应的是一个数组，
+    // 后面用于存储coroutine
     lua_pushlightuserdata(L, &ngx_stream_lua_coroutines_key);
     lua_createtable(L, 0, 32 /* nrec */);
     lua_rawset(L, LUA_REGISTRYINDEX);
@@ -698,9 +712,10 @@ ngx_stream_lua_request_cleanup(ngx_stream_lua_ctx_t *ctx, int forcible)
  *  NGX_ERROR:      error
  *  >= 200          HTTP status code
  */
+// 具体执行协程里面的代码，有可能是第一次执行，也有可能是上一次被yield出去这一次继续执行
 ngx_int_t
 ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
-    ngx_stream_lua_ctx_t *ctx, volatile int nrets)
+    ngx_stream_lua_ctx_t *ctx, volatile int nrets /* 为什么这个变量需要是volatile？ */)
 {
     ngx_stream_lua_co_ctx_t   *next_coctx, *parent_coctx, *orig_coctx;
     int                      rv, success = 1;
@@ -720,16 +735,20 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
 
 
     /* set Lua VM panic handler */
+    // 为什么每一次执行都要set一次panic的回调函数？
+    // 每次都设置一次的原因，在于可能是不同的协程指针调用的
     lua_atpanic(L, ngx_stream_lua_atpanic);
 
     dd("ctx = %p", ctx);
 
-    NGX_LUA_EXCEPTION_TRY {
+    NGX_LUA_EXCEPTION_TRY /* setjmp保存环境 */ {
 
         if (ctx->cur_co_ctx->thread_spawn_yielded) {
+            // 如果是由于创建uthread才让出执行权的
             ngx_stream_lua_probe_info("thread spawn yielded");
 
             ctx->cur_co_ctx->thread_spawn_yielded = 0;
+            // ???
             nrets = 1;
         }
 
@@ -748,6 +767,7 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
             dd("cur co: %p", ctx->cur_co_ctx->co);
             dd("cur co status: %d", ctx->cur_co_ctx->co_status);
 
+            // 拿到当前协程数据结构
             orig_coctx = ctx->cur_co_ctx;
 
 #ifdef NGX_LUA_USE_ASSERT
@@ -766,6 +786,7 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
             ngx_stream_lua_assert(orig_coctx->co_top + nrets
                                 == lua_gettop(orig_coctx->co));
 
+            // 执行协程
             rv = lua_resume(orig_coctx->co, nrets);
 
 #if (NGX_PCRE)
@@ -784,7 +805,7 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                            "lua resume returned %d", rv);
 
             switch (rv) {
-            case LUA_YIELD:
+            case LUA_YIELD: // 执行过程中被让出执行权
                 /*  yielded, let event handler do the rest job */
                 /*  FIXME: add io cmd dispatcher here */
 
@@ -799,12 +820,10 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
 #endif
 
 
-
+                // 本次执行的上下文已经退出了
                 if (ctx->exited) {
                     return ngx_stream_lua_handle_exit(L, r, ctx);
                 }
-
-
 
                 /*
                  * check if coroutine.resume or coroutine.yield called
@@ -812,20 +831,26 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                  */
                 switch(ctx->co_op) {
                 case NGX_STREAM_LUA_USER_CORO_NOP:
+                    // 这种情况是发生了API层面的yield操作
                     dd("hit! it is the API yield");
 
                     ngx_stream_lua_assert(lua_gettop(ctx->cur_co_ctx->co) == 0);
 
                     ctx->cur_co_ctx = NULL;
 
+                    // 返回again
                     return NGX_AGAIN;
 
-                case NGX_STREAM_LUA_USER_THREAD_RESUME:
+                case NGX_STREAM_LUA_USER_THREAD_RESUME: // lua代码中创建了用户线程
 
                     ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                                    "lua user thread resume");
 
+                    // 设置为NGX_STREAM_LUA_USER_CORO_NOP
                     ctx->co_op = NGX_STREAM_LUA_USER_CORO_NOP;
+                    // 此时的ctx->cur_co_ctx->co是由thread.spawn创建的用户线程
+                    // 以下这里得到传入这个用户线程的函数参数数量
+                    // -1是因为传入thread.spawn的第一个参数是线程入口函数，因此要略过这个参数
                     nrets = lua_gettop(ctx->cur_co_ctx->co) - 1;
                     dd("nrets = %d", nrets);
 
@@ -834,9 +859,10 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                     orig_coctx->co_top--;
 #endif
 
+                    // break意味着下一次循环继续执行resume操作
                     break;
 
-                case NGX_STREAM_LUA_USER_CORO_RESUME:
+                case NGX_STREAM_LUA_USER_CORO_RESUME:   // coroutine.resume
                     ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                                    "lua coroutine: resume");
 
@@ -844,6 +870,7 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                      * the target coroutine lies at the base of the
                      * parent's stack
                      */
+                    // 设置为NGX_STREAM_LUA_USER_CORO_NOP
                     ctx->co_op = NGX_STREAM_LUA_USER_CORO_NOP;
 
                     old_co = ctx->cur_co_ctx->parent_co_ctx->co;
@@ -862,17 +889,19 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
 
                 default:
                     /* ctx->co_op == NGX_STREAM_LUA_USER_CORO_YIELD */
+                    // 其他情况就都是NGX_STREAM_LUA_USER_CORO_YIELD了，即调用了coroutine.yield
 
                     ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                                    "lua coroutine: yield");
 
                     ctx->co_op = NGX_STREAM_LUA_USER_CORO_NOP;
 
-                    if (ngx_stream_lua_is_thread(ctx)) {
+                    if (ngx_stream_lua_is_thread(ctx)) {    // 如果ctx是用户线程
                         ngx_stream_lua_probe_thread_yield(r, ctx->cur_co_ctx->co);
 
                         /* discard any return values from user
                          * coroutine.yield()'s arguments */
+                        // 为什么这里这里将yield的参数全都抛弃掉
                         lua_settop(ctx->cur_co_ctx->co, 0);
 
 #ifdef NGX_LUA_USE_ASSERT
@@ -882,23 +911,29 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                         ngx_stream_lua_probe_info("set co running");
                         ctx->cur_co_ctx->co_status = NGX_STREAM_LUA_CO_RUNNING;
 
-                        if (ctx->posted_threads) {
+                        if (ctx->posted_threads) {  // 如果有post线程队列，说明有pending的线程
+                            // 加入到posted_threads中
                             ngx_stream_lua_post_thread(r, ctx, ctx->cur_co_ctx);
+                            // 置当前协程上下文指针为NULL
                             ctx->cur_co_ctx = NULL;
+                            // 返回等待下一次被唤醒调度
                             return NGX_AGAIN;
                         }
 
                         /* no pending threads, so resume the thread
                          * immediately */
-
+                        // 到了这里说明没有pending的线程，继续下一次调用
                         nrets = 0;
                         continue;
                     }
 
+                    // 到了这里意味着当前协程不是用户线程
                     /* being a user coroutine that has a parent */
 
+                    // 拿到栈顶数据数量
                     nrets = lua_gettop(ctx->cur_co_ctx->co);
 
+                    // 拿到父协程上下文
                     next_coctx = ctx->cur_co_ctx->parent_co_ctx;
                     next_co = next_coctx->co;
 
@@ -906,32 +941,38 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                      * prepare return values for coroutine.resume
                      * (true plus any retvals)
                      */
+                    // push到父协程中一个bool数据
                     lua_pushboolean(next_co, 1);
 
                     if (nrets) {
                         dd("moving %d return values to next co", nrets);
+                        // 将返回值move到父协程中
                         lua_xmove(ctx->cur_co_ctx->co, next_co, nrets);
 #ifdef NGX_LUA_USE_ASSERT
                         ctx->cur_co_ctx->co_top -= nrets;
 #endif
                     }
 
+                    // +1是为了多加上bool值
                     nrets++;  /* add the true boolean value */
 
+                    // 下一次调度切换到父协程
                     ctx->cur_co_ctx = next_coctx;
 
                     break;
                 }
 
                 /* try resuming on the new coroutine again */
+                // 也就是大部分LUA_YIELD的情况，除了直接return的，都会继续循环的调用
                 continue;
 
-            case 0:
+            case 0: // 为0意味着协程正常执行完毕退出了
 
                 ngx_stream_lua_cleanup_pending_operation(ctx->cur_co_ctx);
 
                 ngx_stream_lua_probe_coroutine_done(r, ctx->cur_co_ctx->co, 1);
 
+                // 协程运行状态是dead
                 ctx->cur_co_ctx->co_status = NGX_STREAM_LUA_CO_DEAD;
 
                 if (ctx->cur_co_ctx->zombie_child_threads) {
@@ -942,41 +983,50 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                 ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                                "lua light thread ended normally");
 
-                if (ngx_stream_lua_is_entry_thread(ctx)) {
+                if (ngx_stream_lua_is_entry_thread(ctx)) {  // 如果是入口线程
 
+                    // 恢复堆栈
                     lua_settop(L, 0);
 
                     ngx_stream_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
 
                     dd("uthreads: %d", (int) ctx->uthreads);
 
-                    if (ctx->uthreads) {
+                    if (ctx->uthreads) {    // 如果用户线程数量不为0
 
                         ctx->cur_co_ctx = NULL;
                         return NGX_AGAIN;
                     }
 
+                    // 到了这里就是所有用户线程都退出了
                     /* all user threads terminated already */
                     goto done;
                 }
 
-                if (ctx->cur_co_ctx->is_uthread) {
+                if (ctx->cur_co_ctx->is_uthread) {  // 如果是用户线程
                     /* being a user thread */
 
+                    // 恢复堆栈
                     lua_settop(L, 0);
 
+                    // 拿到父协程上下文
                     parent_coctx = ctx->cur_co_ctx->parent_co_ctx;
 
-                    if (ngx_stream_lua_coroutine_alive(parent_coctx)) {
-                        if (ctx->cur_co_ctx->waited_by_parent) {
+                    if (ngx_stream_lua_coroutine_alive(parent_coctx)) { // 如果父协程还存活
+                        if (ctx->cur_co_ctx->waited_by_parent) { // 如果父协程在等待这个协程的信息
                             ngx_stream_lua_probe_info("parent already waiting");
                             ctx->cur_co_ctx->waited_by_parent = 0;
+                            // 向父协程返回true
                             success = 1;
+                            // 跳转到user_co_done
                             goto user_co_done;
                         }
 
+                        // 到了这里就是父协程还存活，但是没有等待该协程的情况
+                        // 这意味着这个协程成了僵尸协程了
                         ngx_stream_lua_probe_info("parent still alive");
 
+                        // 加入到parent的zombie线程队列中
                         if (ngx_stream_lua_post_zombie_thread(r, parent_coctx,
                                                             ctx->cur_co_ctx)
                             != NGX_OK)
@@ -993,15 +1043,19 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                     }
 
                     ngx_stream_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
+                    // 用户线程数量减一
                     ctx->uthreads--;
 
-                    if (ctx->uthreads == 0) {
-                        if (ngx_stream_lua_entry_thread_alive(ctx)) {
+                    if (ctx->uthreads == 0) {   // 如果用户线程数量为0
+                        if (ngx_stream_lua_entry_thread_alive(ctx)) {   // 如果入口线程还存活
+                            // 将当前协程上下文置NULL
                             ctx->cur_co_ctx = NULL;
+                            // 返回again等待下一次被调度唤醒
                             return NGX_AGAIN;
                         }
 
                         /* all threads terminated already */
+                        // 否则就是所有用户线程都退出了
                         goto done;
                     }
 
@@ -1014,26 +1068,31 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
 
                 success = 1;
 
-user_co_done:
-
+user_co_done:   // 这个标签意味着用户线程执行完毕
+                // 拿到栈顶元素数量
                 nrets = lua_gettop(ctx->cur_co_ctx->co);
 
+                // 拿到父协程指针
                 next_coctx = ctx->cur_co_ctx->parent_co_ctx;
 
+                // 父协程指针为空？
                 if (next_coctx == NULL) {
                     /* being a light thread */
                     goto no_parent;
                 }
 
+                // 拿到协程指针
                 next_co = next_coctx->co;
 
                 /*
                  * ended successful, coroutine.resume returns true plus
                  * any return values
                  */
+                // push进去bool值
                 lua_pushboolean(next_co, success);
 
                 if (nrets) {
+                    // 移动栈元素到协程
                     lua_xmove(ctx->cur_co_ctx->co, next_co, nrets);
                 }
 
@@ -1042,7 +1101,9 @@ user_co_done:
                     ctx->uthreads--;
                 }
 
+                // +1是为了多bool值
                 nrets++;
+                // 切换当前协程
                 ctx->cur_co_ctx = next_coctx;
 
                 ngx_stream_lua_probe_info("set parent running");
@@ -1052,6 +1113,7 @@ user_co_done:
                 ngx_log_debug0(NGX_LOG_DEBUG_STREAM, r->connection->log, 0,
                                "lua coroutine: lua user thread ended normally");
 
+                // 这里continue是为了下一次循环执行lua_resume
                 continue;
 
             case LUA_ERRRUN:
@@ -1075,11 +1137,14 @@ user_co_done:
                 err = "unknown error";
                 break;
             }
+            // 到了这里就都是协程代码出问题的场景了
 
+            // 这里为什么要切换回去上下文指针
             if (ctx->cur_co_ctx != orig_coctx) {
                 ctx->cur_co_ctx = orig_coctx;
             }
 
+            // 如果是字符串，可能是出错信息
             if (lua_isstring(ctx->cur_co_ctx->co, -1)) {
                 dd("user custom error msg");
                 msg = lua_tostring(ctx->cur_co_ctx->co, -1);
@@ -1092,29 +1157,35 @@ user_co_done:
 
             ngx_stream_lua_probe_coroutine_done(r, ctx->cur_co_ctx->co, 0);
 
+            // 当前协程状态为dead
             ctx->cur_co_ctx->co_status = NGX_STREAM_LUA_CO_DEAD;
 
+            // 拿到协程栈信息
             ngx_stream_lua_thread_traceback(L, ctx->cur_co_ctx->co,
                                           ctx->cur_co_ctx);
             trace = lua_tostring(L, -1);
 
-            if (ctx->cur_co_ctx->is_uthread) {
-
+            if (ctx->cur_co_ctx->is_uthread) {  // 如果是用户线程
+                // 打印出错信息以及traceback堆栈
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                               "stream lua user thread aborted: %s: %s\n%s",
                               err, msg, trace);
 
+                // 恢复栈
                 lua_settop(L, 0);
 
+                // 拿到父协程指针
                 parent_coctx = ctx->cur_co_ctx->parent_co_ctx;
 
-                if (ngx_stream_lua_coroutine_alive(parent_coctx)) {
+                if (ngx_stream_lua_coroutine_alive(parent_coctx)) { // 父协程还存活
                     if (ctx->cur_co_ctx->waited_by_parent) {
                         ctx->cur_co_ctx->waited_by_parent = 0;
+                        // success为0，因为协程执行出错了
                         success = 0;
                         goto user_co_done;
                     }
 
+                    // 加入到父协程的zombie线程链表中
                     if (ngx_stream_lua_post_zombie_thread(r, parent_coctx,
                                                         ctx->cur_co_ctx)
                         != NGX_OK)
@@ -1125,39 +1196,47 @@ user_co_done:
                     lua_pushboolean(ctx->cur_co_ctx->co, 0);
                     lua_insert(ctx->cur_co_ctx->co, 1);
 
+                    // 修改状态是zombie状态
                     ctx->cur_co_ctx->co_status = NGX_STREAM_LUA_CO_ZOMBIE;
+                    // 置空当前协程上下文指针
                     ctx->cur_co_ctx = NULL;
+                    // 返回again
                     return NGX_AGAIN;
                 }
 
                 ngx_stream_lua_del_thread(r, L, ctx, ctx->cur_co_ctx);
+                // 用户线程数量减一
                 ctx->uthreads--;
 
-                if (ctx->uthreads == 0) {
-                    if (ngx_stream_lua_entry_thread_alive(ctx)) {
+                if (ctx->uthreads == 0) {   // 如果用户线程数量为0
+                    if (ngx_stream_lua_entry_thread_alive(ctx)) {   // 如果当前入口线程还存活
+                        // 设置当前协程上下文为NULL
                         ctx->cur_co_ctx = NULL;
                         return NGX_AGAIN;
                     }
 
                     /* all threads terminated already */
+                    // 到了这里意味着所有线程都退出了
                     goto done;
                 }
 
                 /* some other user threads still running */
+                // 到了这里意味着还有别的线程在运行
+                // 当前协程上下文为NULL
                 ctx->cur_co_ctx = NULL;
                 return NGX_AGAIN;
             }
 
-            if (ngx_stream_lua_is_entry_thread(ctx)) {
+            if (ngx_stream_lua_is_entry_thread(ctx)) {  // 如果是入口函数
+                // 打印出错信息
                 ngx_log_error(NGX_LOG_ERR, r->connection->log, 0,
                               "lua entry thread aborted: %s: %s\n%s",
                               err, msg, trace);
 
+                // 恢复栈
                 lua_settop(L, 0);
 
                 /* being the entry thread aborted */
-
-
 
                 ngx_stream_lua_request_cleanup(ctx, 0);
 
@@ -1174,9 +1253,12 @@ user_co_done:
             }
 
             /* being a user coroutine that has a parent */
+            // 到了这里就是有父协程的用户协程
 
+            // 拿到父协程指针
             next_coctx = ctx->cur_co_ctx->parent_co_ctx;
             if (next_coctx == NULL) {
+                // 父协程为空
                 goto no_parent;
             }
 
@@ -1190,6 +1272,7 @@ user_co_done:
              * ended with error, coroutine.resume returns false plus
              * err msg
              */
+            // resume返回false以及出错信息
             lua_pushboolean(next_co, 0);
             lua_xmove(ctx->cur_co_ctx->co, next_co, 1);
             nrets = 2;
@@ -1200,6 +1283,7 @@ user_co_done:
                           "lua coroutine: %s: %s\n%s", err, msg, trace);
 
             /* try resuming on the new coroutine again */
+            // 下一次循环再resume一次
             continue;
         }
 
@@ -1209,27 +1293,18 @@ user_co_done:
 
     return NGX_ERROR;
 
-no_parent:
-
+no_parent:  // 这里处理父协程为空的情况
     lua_settop(L, 0);
-
     ctx->cur_co_ctx->co_status = NGX_STREAM_LUA_CO_DEAD;
-
-
 
     ngx_stream_lua_request_cleanup(ctx, 0);
 
     ngx_log_error(NGX_LOG_ERR, r->connection->log, 0, "lua handler aborted: "
                   "user coroutine has no parent");
 
-
     return NGX_STREAM_INTERNAL_SERVER_ERROR;
 
-
 done:
-
-
-
     return NGX_OK;
 }
 
@@ -2385,7 +2460,7 @@ ngx_stream_lua_chain_get_free_buf(ngx_log_t *log, ngx_pool_t *p,
     return cl;
 }
 
-
+// 返回Lua堆栈信息
 static int
 ngx_stream_lua_thread_traceback(lua_State *L, lua_State *co,
     ngx_stream_lua_co_ctx_t *coctx)
@@ -2490,7 +2565,7 @@ ngx_stream_lua_traceback(lua_State *L)
 
 
 
-
+// 根据L查询对应的ngx_stream_lua_co_ctx_t返回
 ngx_stream_lua_co_ctx_t *
 ngx_stream_lua_get_co_ctx(lua_State *L, ngx_stream_lua_ctx_t *ctx)
 {
@@ -2498,14 +2573,17 @@ ngx_stream_lua_get_co_ctx(lua_State *L, ngx_stream_lua_ctx_t *ctx)
     ngx_list_part_t             *part;
     ngx_stream_lua_co_ctx_t       *coctx;
 
+    // 如果是入口的Lua协程，直接返回所属的ngx_stream_lua_co_ctx_t指针
     if (L == ctx->entry_co_ctx.co) {
         return &ctx->entry_co_ctx;
     }
 
+    // 如果user_co_ctx数组为空，返回NULL
     if (ctx->user_co_ctx == NULL) {
         return NULL;
     }
 
+    // 以下是遍历user_co_ctx数组线性查询
     part = &ctx->user_co_ctx->part;
     coctx = part->elts;
 
@@ -2531,7 +2609,7 @@ ngx_stream_lua_get_co_ctx(lua_State *L, ngx_stream_lua_ctx_t *ctx)
     return NULL;
 }
 
-
+// 创建一个ngx_stream_lua_co_ctx_t结构体指针
 ngx_stream_lua_co_ctx_t *
 ngx_stream_lua_create_co_ctx(ngx_stream_lua_request_t *r, ngx_stream_lua_ctx_t *ctx)
 {
@@ -2545,6 +2623,7 @@ ngx_stream_lua_create_co_ctx(ngx_stream_lua_request_t *r, ngx_stream_lua_ctx_t *
         }
     }
 
+    // 写入user_co_ctx数组
     coctx = ngx_list_push(ctx->user_co_ctx);
     if (coctx == NULL) {
         return NULL;
@@ -2610,7 +2689,7 @@ ngx_stream_lua_run_posted_threads(ngx_connection_t *c, lua_State *L,
     /* impossible to reach here */
 }
 
-
+// 把coctx加入到posted_threads链表中
 ngx_int_t
 ngx_stream_lua_post_thread(ngx_stream_lua_request_t *r, ngx_stream_lua_ctx_t *ctx,
     ngx_stream_lua_co_ctx_t *coctx)
@@ -2746,7 +2825,7 @@ ngx_stream_lua_finalize_threads(ngx_stream_lua_request_t *r,
     }
 }
 
-
+// 加入到zombie_child_threads中
 static ngx_int_t
 ngx_stream_lua_post_zombie_thread(ngx_stream_lua_request_t *r,
     ngx_stream_lua_co_ctx_t *parent, ngx_stream_lua_co_ctx_t *thread)
@@ -3029,11 +3108,7 @@ ngx_stream_lua_finalize_request(ngx_stream_lua_request_t *r, ngx_int_t rc)
     }
 
     if (r->connection->fd != (ngx_socket_t) -1) {
-
-
         ngx_stream_lua_finalize_real_request(r, rc);
-
-
         return;
     }
 
@@ -3053,22 +3128,14 @@ ngx_stream_lua_finalize_fake_request(ngx_stream_lua_request_t *r, ngx_int_t rc)
 
     c = r->connection;
 
-
     ngx_log_debug1(NGX_LOG_DEBUG_STREAM, c->log, 0,
                    "stream lua finalize fake request: %d", rc);
 
-
     if (rc == NGX_DONE) {
-
-
-
         return;
     }
 
-
     if (rc == NGX_ERROR || rc >= NGX_STREAM_BAD_REQUEST) {
-
-
 #if (NGX_STREAM_SSL)
 
         if (r->connection->ssl) {
@@ -3109,13 +3176,7 @@ ngx_stream_lua_close_fake_request(ngx_stream_lua_request_t *r)
 {
     ngx_connection_t  *c;
 
-
-
     c = r->connection;
-
-
-
-
 
     ngx_stream_lua_free_fake_request(r);
     ngx_stream_lua_close_fake_connection(c);
