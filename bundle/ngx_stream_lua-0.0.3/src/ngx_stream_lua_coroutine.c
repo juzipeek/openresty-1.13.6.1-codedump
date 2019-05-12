@@ -207,6 +207,7 @@ ngx_stream_lua_coroutine_resume(lua_State *L)
 
     /* yield and pass args to main thread, and resume target coroutine from
      * there */
+    // 让出执行权给主线程，在那里做resume coroutine的操作
     return lua_yield(L, lua_gettop(L) - 1);
 }
 

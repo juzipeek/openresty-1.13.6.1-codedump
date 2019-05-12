@@ -878,6 +878,7 @@ ngx_stream_lua_run_thread(lua_State *L, ngx_stream_lua_request_t *r,
                     nrets = lua_gettop(old_co);
                     if (nrets) {
                         dd("moving %d return values to parent", nrets);
+                        // 移动协程resume函数的参数
                         lua_xmove(old_co, ctx->cur_co_ctx->co, nrets);
 
 #ifdef NGX_LUA_USE_ASSERT

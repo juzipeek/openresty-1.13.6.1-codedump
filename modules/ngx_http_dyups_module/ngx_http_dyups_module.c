@@ -2332,7 +2332,7 @@ ngx_http_dyups_save_peer_session(ngx_peer_connection_t *pc, void *data)
 
 #endif
 
-
+// 采用红黑树，避免重复添加
 static ngx_int_t
 ngx_dyups_add_upstream_filter(ngx_http_upstream_main_conf_t *umcf,
     ngx_http_upstream_srv_conf_t *uscf)
